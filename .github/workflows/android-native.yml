@@ -86,6 +86,20 @@ jobs:
             /tmp/wl4-video-init.o /tmp/wl4-video-globals.o \
             -o /tmp/wl4-native-dma-test
           /tmp/wl4-native-dma-test
+      - name: Test original room RLE decoder and bounded native room loader
+        run: |
+          cc -std=gnu11 -DWL4_ANDROID_NATIVE -Iandroid/app/src/main/cpp \
+            -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -c src/game_screen_helpers.c -o /tmp/wl4-room-original.o
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            android/app/src/main/cpp/room_assets.cpp \
+            android/app/src/main/cpp/native_memory.cpp \
+            android/app/src/main/cpp/gba_bios_decode.cpp \
+            android/app/src/main/cpp/gba_video.cpp \
+            android/tests/test_room_assets.cpp /tmp/wl4-room-original.o \
+            -o /tmp/wl4-room-test
+          /tmp/wl4-room-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -104,5 +118,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: warioland4-android-original-video-dma-0.7-not-playable
+          name: warioland4-android-native-rooms-0.8-not-playable
           path: android/app/build/outputs/apk/debug/app-debug.apk

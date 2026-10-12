@@ -4,11 +4,13 @@ project(wl4_native LANGUAGES C CXX)
 add_library(wl4_native SHARED
     native_bridge.cpp
     rom_assets.cpp
+    room_assets.cpp
     gba_video.cpp
     frame_clock.cpp
     native_memory.cpp
     gba_bios_decode.cpp
     wl4_host_game_globals.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/game_screen_helpers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/init_helpers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/screen_shake.c

@@ -65,6 +65,8 @@ void wl4HostDmaFill32(unsigned int channel, uint32_t pattern, uint32_t address, 
 #define DmaFill32(channel, pattern, address, bytes) \
     wl4HostDmaFill32((channel), (pattern), (address), (bytes))
 void InitializeVideoMemory(void);
+u32 GetBackgroundScreenSize(u8 parameter);
+u32 DecompressRoomBackground(u8 type, const u8* source, u8* destination);
 
 // Wario Land 4's original main.c mode values and soft-reset button handler.
 enum {

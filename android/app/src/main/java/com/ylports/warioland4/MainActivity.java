@@ -23,7 +23,7 @@ import javax.microedition.khronos.opengles.GL10;
 /**
  * Platform-only milestone. This does not yet execute Wario Land 4's game logic.
  * The ROM picker validates an owned, unmodified ROM and the native renderer
- * previews decoded 4bpp tile data from that ROM.
+ * previews original rooms from that ROM.
  */
 public final class MainActivity extends Activity {
     private static final int PICK_ROM = 10;
@@ -88,7 +88,7 @@ public final class MainActivity extends Activity {
         status.setBackgroundColor(0x88000000);
         status.setTextSize(13);
         status.setPadding(14, 8, 14, 8);
-        status.setText("Diagnóstico gráfico nativo BG/OBJ • El juego todavía no se ejecuta");
+        status.setText("Escenarios nativos • El juego todavía no se ejecuta");
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2);
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         root.addView(status, params);
@@ -173,7 +173,7 @@ public final class MainActivity extends Activity {
             status.setText("Error al validar o decodificar recursos de ROM");
             return false;
         }
-        status.setText("ROM " + version + " • Diagnóstico BG/OBJ • Cruceta: cámara • A/B: sacudida • NO jugable");
+        status.setText("ROM " + version + " • Escenarios originales • Cruceta: cámara • L/R: habitación • NO jugable");
         return true;
     }
 

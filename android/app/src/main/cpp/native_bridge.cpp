@@ -12,6 +12,7 @@
 #include "frame_clock.h"
 #include "gba_video.h"
 #include "native_memory.h"
+#include "room_assets.h"
 #include <string>
 
 extern "C" {
@@ -22,34 +23,25 @@ extern "C" {
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "wl4-native", __VA_ARGS__)
 
 namespace {
-constexpr size_t kPaletteOffset = 0x400A68;  // common_sprites.pal (US/JP)
-constexpr size_t kTileOffset = 0x400AE8;     // common_sprites.4bpp (US/JP)
-constexpr size_t kTileBytes = 0x3000;
-constexpr size_t kTileCount = kTileBytes / 32;
 std::mutex gMutex;
 wl4::NativeMemory gMemory;
 std::string gSavePath;
 wl4::VideoState gState;
 wl4::GbaVideo gVideo;
+wl4::RoomAssets gRoom;
 wl4::FrameClock gClock;
 std::vector<uint32_t> gPixels;
 bool gSceneLoaded = false;
 bool gUploadPending = false;
-uint16_t gCameraBaseX = 0;
-uint16_t gCameraBaseY = 0;
+int gCameraBaseX = 0;
+int gCameraBaseY = 0;
 
 GLuint gTexture = 0;
 GLuint gProgram = 0;
 GLint gPos = -1, gUV = -1, gSampler = -1;
 int gWidth = 1, gHeight = 1;
 
-void write16(uint8_t* p, size_t at, uint16_t val) {
-    p[at] = static_cast<uint8_t>(val & 255u);
-    p[at + 1] = static_cast<uint8_t>(val >> 8);
-}
-
-// A diagnostic scene built from original tiles. This is NOT the game engine;
-// it checks palette/VRAM/OAM/camera functionality while porting the C logic.
+// Native room preview. Gameplay logic is not connected yet.
 // Bridge the *original* InitializeVideoMemory() function to host RAM.
 int hostDmaFill(void* context, uint32_t address, uint32_t pattern,
                 uint32_t bytes, uint32_t unitBytes) {
@@ -58,44 +50,18 @@ int hostDmaFill(void* context, uint32_t address, uint32_t pattern,
         address, pattern, bytes, unitBytes) ? 1 : 0;
 }
 
-// The artwork is still a diagnostic, but loading now uses host DMA copies
-// from the imported ROM and the original game initialization routine.
-bool buildDiagnosticScene() {
-    wl4HostSetDmaFillHandler(&gMemory, hostDmaFill);
-    InitializeVideoMemory(); // Original src/init_helpers.c implementation.
-    const uint32_t palette = 0x08000000u + static_cast<uint32_t>(kPaletteOffset);
-    const uint32_t tiles = 0x08000000u + static_cast<uint32_t>(kTileOffset);
-    if (!gMemory.CopyRegion(palette, 0x05000000u, 128, 2) ||
-        !gMemory.CopyRegion(palette, 0x05000200u, 128, 2) ||
-        !gMemory.CopyRegion(tiles, 0x06000000u, kTileBytes, 4) ||
-        !gMemory.CopyRegion(tiles, 0x06010000u, kTileBytes, 4)) {
+bool buildRoomScene() {
+    std::string error;
+    if (!gRoom.Load(gMemory, 0, 0, &error)) {
+        LOGE("First room load failed: %s", error.c_str());
         return false;
     }
-    wl4::VideoState state = gMemory.CaptureVideo();
-
-    // Use tiled mode 0, 1D sprite mapping, BG0/BG1 + OBJ.
-    state.dispcnt = 0x40 | 0x100 | 0x200 | 0x1000;
-    state.bgcnt[0] = 16u << 8;       // screen block 16, priority 0
-    state.bgcnt[1] = (17u << 8) | 1; // screen block 17, priority 1
-
-    // Both tilemaps use decoded original sprite data as a render diagnostic.
-    for (int y = 0; y < 32; ++y) {
-        for (int x = 0; x < 32; ++x) {
-            const size_t tile = static_cast<size_t>(y * 32 + x);
-            write16(state.vram.data(), 0x8000 + tile * 2,
-                    static_cast<uint16_t>(1 + tile % (kTileCount - 1)));
-            write16(state.vram.data(), 0x8800 + tile * 2,
-                    static_cast<uint16_t>((tile * 7) % kTileCount));
-        }
-    }
-    for (int i = 0; i < 128; ++i) {
-        write16(state.oam.data(), static_cast<size_t>(i) * 8, 0x0200);
-    }
-    // One 32x32 sprite to validate priority and compositing. Not a playable Wario.
-    write16(state.oam.data(), 0, 64);          // sprite Y
-    write16(state.oam.data(), 2, 104 | 0x8000); // size=2 (32x32)
-    write16(state.oam.data(), 4, 32 | 0x0000);  // tile 32, priority 0
-    gCameraBaseX = gCameraBaseY = 0;
+    wl4HostSetDmaFillHandler(&gMemory, hostDmaFill);
+    InitializeVideoMemory();
+    wl4::VideoState state;
+    gCameraBaseX = gRoom.InitialCameraX();
+    gCameraBaseY = gRoom.InitialCameraY();
+    gRoom.BuildVideo(gCameraBaseX, gCameraBaseY, &state);
     gScreenShakeX = {};
     gScreenShakeY = {};
     gButtonsHeld = gButtonsHeldCopy = gButtonsPressed = 0;
@@ -178,47 +144,45 @@ void uploadTexture() {
     gUploadPending = false;
 }
 
-void updateDiagnosticCamera(int ticks) {
+void updateRoomPreview(int ticks) {
     if (!gSceneLoaded) return;
     bool redraw = false;
-    // Call the original decompiled input, shake and interrupt handlers once
+    // Call the original decompiled input and interrupt handlers once
     // per logical frame instead of tying game ticks to the Android refresh rate.
     for (int frame = 0; frame < ticks; ++frame) {
         wl4HostKeyInput = gMemory.Read16(0x04000130);
         PollInput();
         CheckSoftReset(); // original src/main.c function
-        // Diagnostic only: disarm the reset state for the next host test frame.
         if (gMainGameMode == GM_SOFT_RESET) {
             gMainGameMode = GM_CUTSCENE;
-            gCameraBaseX = gCameraBaseY = 0;
+            gCameraBaseX = gRoom.InitialCameraX();
+            gCameraBaseY = gRoom.InitialCameraY();
+            redraw = true;
         }
-        if (gButtonsPressed & 1u) ScreenShakeRequestXWithAmplitude(24, 3);
-        if (gButtonsPressed & 2u) ScreenShakeRequestY(24, 3);
-        const int dx = ((gButtonsHeld & 16u) != 0) -
-                       ((gButtonsHeld & 32u) != 0);
-        const int dy = ((gButtonsHeld & 128u) != 0) -
-                       ((gButtonsHeld & 64u) != 0);
-        const int16_t step = Q_8_8(0.5);
-        gCameraBaseX = static_cast<uint16_t>(gCameraBaseX + FixedMul(dx * 4, step));
-        gCameraBaseY = static_cast<uint16_t>(gCameraBaseY + FixedMul(dy * 4, step));
-        // The real screen-shake functions now drive only our diagnostic scene.
-        const int shakeX = ScreenShakeUpdateX();
-        const int shakeY = ScreenShakeUpdateY();
-        const uint16_t x = static_cast<uint16_t>(gCameraBaseX + shakeX);
-        const uint16_t y = static_cast<uint16_t>(gCameraBaseY + shakeY);
-        if (x != gMemory.Read16(0x04000010) ||
-            y != gMemory.Read16(0x04000012)) {
-            gMemory.Write16(0x04000010, x);
-            gMemory.Write16(0x04000012, y);
-            gMemory.Write16(0x04000014, static_cast<uint16_t>(gCameraBaseX / 2 + shakeX / 2));
-            gMemory.Write16(0x04000016, static_cast<uint16_t>(gCameraBaseY / 2 + shakeY / 2));
+        if (gButtonsPressed & (256u | 512u)) {
+            const int direction = (gButtonsPressed & 256u) ? 1 : -1;
+            const int next = (gRoom.RoomId() + direction + gRoom.RoomCount()) % gRoom.RoomCount();
+            std::string error;
+            if (gRoom.Load(gMemory, gRoom.StageId(), static_cast<uint8_t>(next), &error)) {
+                gCameraBaseX = gRoom.InitialCameraX();
+                gCameraBaseY = gRoom.InitialCameraY();
+                redraw = true;
+            } else LOGE("Room load failed: %s", error.c_str());
+        }
+        const int dx = ((gButtonsHeld & 16u) != 0) - ((gButtonsHeld & 32u) != 0);
+        const int dy = ((gButtonsHeld & 128u) != 0) - ((gButtonsHeld & 64u) != 0);
+        const int x = std::clamp(gCameraBaseX + dx * 2, 0, std::max(0, gRoom.PixelWidth() - 240));
+        const int y = std::clamp(gCameraBaseY + dy * 2, 0, std::max(0, gRoom.PixelHeight() - 160));
+        if (x != gCameraBaseX || y != gCameraBaseY) {
+            gCameraBaseX = x; gCameraBaseY = y;
             redraw = true;
         }
         gInterruptCheck = 0;
         InterruptCallbackCallVBlank();
     }
     if (!redraw) return;
-    gState = gMemory.CaptureVideo();
+    gRoom.BuildVideo(gCameraBaseX, gCameraBaseY, &gState);
+    gMemory.InstallVideoState(gState);
     gVideo.Render(gState, &gPixels);
     gUploadPending = true;
 }
@@ -234,7 +198,7 @@ Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstr
     if (!in) return JNI_FALSE;
     const auto length = in.tellg();
     if (length < 0 || length > 32 * 1024 * 1024 ||
-        length < static_cast<std::streamoff>(kTileOffset + kTileBytes)) {
+        length < static_cast<std::streamoff>(0x78f2e4)) {
         return JNI_FALSE;
     }
     in.seekg(0);
@@ -243,7 +207,7 @@ Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstr
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (!gMemory.LoadRom(std::move(rom))) return JNI_FALSE;
-        if (!buildDiagnosticScene()) return JNI_FALSE;
+        if (!buildRoomScene()) return JNI_FALSE;
     }
     return JNI_TRUE;
 }
@@ -277,7 +241,7 @@ Java_com_ylports_warioland4_MainActivity_nativeDrawFrame(JNIEnv*, jclass,
     {
         std::lock_guard<std::mutex> lock(gMutex);
         const int ticks = gClock.Advance(static_cast<int64_t>(nowNs));
-        if (ticks > 0) updateDiagnosticCamera(ticks);
+        if (ticks > 0) updateRoomPreview(ticks);
     }
     glClearColor(0.055f, 0.065f, 0.085f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);

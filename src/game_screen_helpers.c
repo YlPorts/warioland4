@@ -1,3 +1,6 @@
+#ifdef WL4_ANDROID_NATIVE
+#include "wl4_host_game.h"
+#else
 #include "game_screen_helpers.h"
 
 #include "animated_graphics.h"
@@ -342,6 +345,8 @@ void ConfigureRoomDisplay(void)
     }
 }
 
+#endif // !WL4_ANDROID_NATIVE
+
 u32 GetBackgroundScreenSize(u8 arg0)
 {
     u32 result;
@@ -363,6 +368,7 @@ u32 GetBackgroundScreenSize(u8 arg0)
     return result;
 }
 
+#ifndef WL4_ANDROID_NATIVE
 void LoadRoom(void)
 {
     struct RoomHeader* roomHeader;
@@ -1152,11 +1158,17 @@ void PreloadStageRoomBackgrounds(void)
     }
 }
 
+#endif // !WL4_ANDROID_NATIVE
+
 u32 DecompressRoomBackground(u8 type, const u8* sourceArg, u8* destinationArg)
 {
     const u8* source;
     u8* destination;
+#ifdef WL4_ANDROID_NATIVE
+    u32 result;
+#else
     register u32 result asm("r5");
+#endif
     u8* base;
     s32 pass;
     u32 count;
@@ -1256,6 +1268,7 @@ u32 DecompressRoomBackground(u8 type, const u8* sourceArg, u8* destinationArg)
     return result;
 }
 
+#ifndef WL4_ANDROID_NATIVE
 u32 LoadBossPauseBackgroundTiles(u8 useAlternateTiles)
 {
     struct DmaRegisters* dma;
@@ -1769,3 +1782,5 @@ void DrawGameScreen(void)
     }
     UpdateHBlankEffect();
 }
+
+#endif // !WL4_ANDROID_NATIVE

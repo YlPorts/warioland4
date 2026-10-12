@@ -45,6 +45,13 @@ NativeMemory::NativeMemory() {
     SetButtons(0);
 }
 
+const uint8_t* NativeMemory::RomRange(uint32_t address, size_t bytes) const {
+    if (address < 0x08000000u || address >= 0x0a000000u || !bytes) return nullptr;
+    const size_t offset = address - 0x08000000u;
+    if (offset >= rom_.size() || bytes > rom_.size() - offset) return nullptr;
+    return rom_.data() + offset;
+}
+
 bool NativeMemory::DecompressRomToMemory(size_t romOffset, uint32_t destination,
                                          Compression format, size_t maxOutput) {
     if (romOffset >= rom_.size() || !maxOutput) return false;

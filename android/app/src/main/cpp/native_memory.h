@@ -24,6 +24,9 @@ public:
     bool LoadRom(std::vector<uint8_t> rom);
     bool HasRom() const { return !rom_.empty(); }
     size_t RomSize() const { return rom_.size(); }
+    // Checked, non-mirrored ROM view, valid until LoadRom is called again.
+    // Used only under the bridge lock or by portable asset-loading tools.
+    const uint8_t* RomRange(uint32_t address, size_t bytes) const;
 
     // Decode GBA BIOS-compressed content from the owned ROM directly into a
     // bounded host RAM or VRAM region, without partial writes on failure.
