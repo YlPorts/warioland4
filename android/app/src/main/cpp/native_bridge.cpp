@@ -2,30 +2,79 @@
 #include <jni.h>
 #include <android/log.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <fstream>
-#include <iterator>
 #include <mutex>
 #include <vector>
-#include <algorithm>
-#include "rom_assets.h"
+
+#include "frame_clock.h"
+#include "gba_video.h"
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "wl4-native", __VA_ARGS__)
 
 namespace {
-constexpr size_t kPaletteOffset = 0x400A68; // common_sprites.pal (US/JP)
-constexpr size_t kTileOffset = 0x400AE8;    // common_sprites.4bpp (US/JP)
-constexpr size_t kTileCount = 0x3000 / 32;
+constexpr size_t kPaletteOffset = 0x400A68;  // common_sprites.pal (US/JP)
+constexpr size_t kTileOffset = 0x400AE8;     // common_sprites.4bpp (US/JP)
+constexpr size_t kTileBytes = 0x3000;
+constexpr size_t kTileCount = kTileBytes / 32;
 std::mutex gMutex;
-std::vector<uint8_t> gPixels;
-int gImageWidth = 0, gImageHeight = 0;
+wl4::VideoState gState;
+wl4::GbaVideo gVideo;
+wl4::FrameClock gClock;
+std::vector<uint32_t> gPixels;
+bool gSceneLoaded = false;
 bool gUploadPending = false;
 std::atomic<int> gButtons{0};
+
 GLuint gTexture = 0;
 GLuint gProgram = 0;
 GLint gPos = -1, gUV = -1, gSampler = -1;
 int gWidth = 1, gHeight = 1;
+
+void write16(uint8_t* p, size_t at, uint16_t val) {
+    p[at] = static_cast<uint8_t>(val & 255u);
+    p[at + 1] = static_cast<uint8_t>(val >> 8);
+}
+
+// A diagnostic scene built from original tiles. This is NOT the game engine;
+// it checks palette/VRAM/OAM/camera functionality while porting the C logic.
+void buildDiagnosticScene(const std::vector<uint8_t>& rom) {
+    wl4::VideoState state;
+    std::copy_n(rom.begin() + kPaletteOffset, 128, state.palette.begin());
+    std::copy_n(rom.begin() + kPaletteOffset, 128, state.palette.begin() + 0x200);
+    std::copy_n(rom.begin() + kTileOffset, kTileBytes, state.vram.begin());
+    std::copy_n(rom.begin() + kTileOffset, kTileBytes, state.vram.begin() + 0x10000);
+
+    // Use tiled mode 0, 1D sprite mapping, BG0/BG1 + OBJ.
+    state.dispcnt = 0x40 | 0x100 | 0x200 | 0x1000;
+    state.bgcnt[0] = 16u << 8;       // screen block 16, priority 0
+    state.bgcnt[1] = (17u << 8) | 1; // screen block 17, priority 1
+
+    // Both tilemaps use decoded original sprite data as a render diagnostic.
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            const size_t tile = static_cast<size_t>(y * 32 + x);
+            write16(state.vram.data(), 0x8000 + tile * 2,
+                    static_cast<uint16_t>(1 + tile % (kTileCount - 1)));
+            write16(state.vram.data(), 0x8800 + tile * 2,
+                    static_cast<uint16_t>((tile * 7) % kTileCount));
+        }
+    }
+    for (int i = 0; i < 128; ++i) {
+        write16(state.oam.data(), static_cast<size_t>(i) * 8, 0x0200);
+    }
+    // One 32x32 sprite to validate priority and compositing. Not a playable Wario.
+    write16(state.oam.data(), 0, 64);          // sprite Y
+    write16(state.oam.data(), 2, 104 | 0x8000); // size=2 (32x32)
+    write16(state.oam.data(), 4, 32 | 0x0000);  // tile 32, priority 0
+    gState = std::move(state);
+    gVideo.Render(gState, &gPixels);
+    gSceneLoaded = true;
+    gUploadPending = true;
+    gClock.Reset();
+}
 
 GLuint shader(GLenum type, const char* code) {
     GLuint s = glCreateShader(type);
@@ -36,13 +85,12 @@ GLuint shader(GLenum type, const char* code) {
     if (!ok) {
         char msg[512] = {};
         glGetShaderInfoLog(s, sizeof(msg), nullptr, msg);
-        LOGE("GL shader compile failed: %s", msg);
+        LOGE("GL shader compilation failed: %s", msg);
         glDeleteShader(s);
         return 0;
     }
     return s;
 }
-
 void makeProgram() {
     static const char* vertex =
         "attribute vec2 aPos; attribute vec2 aUV;"
@@ -87,11 +135,27 @@ void uploadTexture() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, gImageWidth, gImageHeight,
-                 0, GL_RGBA, GL_UNSIGNED_BYTE, gPixels.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, wl4::VideoState::Width,
+                 wl4::VideoState::Height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 gPixels.data());
     gUploadPending = false;
 }
+
+void updateDiagnosticCamera(int ticks) {
+    if (!gSceneLoaded) return;
+    const int buttons = gButtons.load(std::memory_order_relaxed);
+    const int dx = ((buttons & 16) != 0) - ((buttons & 32) != 0);
+    const int dy = ((buttons & 128) != 0) - ((buttons & 64) != 0);
+    if (!dx && !dy) return;
+    gState.hofs[0] = static_cast<uint16_t>(gState.hofs[0] + dx * ticks * 2);
+    gState.vofs[0] = static_cast<uint16_t>(gState.vofs[0] + dy * ticks * 2);
+    // Parallax is only a native test; these are not Wario Land 4 camera rules.
+    gState.hofs[1] = gState.hofs[0] / 2;
+    gState.vofs[1] = gState.vofs[0] / 2;
+    gVideo.Render(gState, &gPixels);
+    gUploadPending = true;
 }
+}  // namespace
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstring path) {
@@ -103,31 +167,21 @@ Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstr
     if (!in) return JNI_FALSE;
     const auto length = in.tellg();
     if (length < 0 || length > 32 * 1024 * 1024 ||
-        length < static_cast<std::streamoff>(kTileOffset + kTileCount * 32)) {
+        length < static_cast<std::streamoff>(kTileOffset + kTileBytes)) {
         return JNI_FALSE;
     }
     in.seekg(0);
     std::vector<uint8_t> rom(static_cast<size_t>(length));
     if (!in.read(reinterpret_cast<char*>(rom.data()), length)) return JNI_FALSE;
-
-    std::vector<uint8_t> pixels;
-    int width = 0, height = 0;
-    if (!wl4::Decode4bppTiles(rom.data(), rom.size(),
-                             kPaletteOffset, kTileOffset, kTileCount,
-                             16, &pixels, &width, &height)) return JNI_FALSE;
     {
         std::lock_guard<std::mutex> lock(gMutex);
-        gPixels = std::move(pixels);
-        gImageWidth = width;
-        gImageHeight = height;
-        gUploadPending = true;
+        buildDiagnosticScene(rom);
     }
     return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_ylports_warioland4_MainActivity_nativeSurfaceCreated(JNIEnv*, jclass) {
-    // A recreated EGL context has invalidated the previous GL objects.
     gTexture = 0;
     gProgram = 0;
     makeProgram();
@@ -144,26 +198,31 @@ Java_com_ylports_warioland4_MainActivity_nativeSurfaceChanged(JNIEnv*, jclass,
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_ylports_warioland4_MainActivity_nativeDrawFrame(JNIEnv*, jclass) {
-    glClearColor(0.055f, 0.065f, 0.085f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    if (!gProgram) return;
-    uploadTexture();
-    if (!gTexture) return;
-    int iw, ih;
+Java_com_ylports_warioland4_MainActivity_nativeResetClock(JNIEnv*, jclass) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    gClock.Reset();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_ylports_warioland4_MainActivity_nativeDrawFrame(JNIEnv*, jclass,
+                                                           jlong nowNs) {
     {
         std::lock_guard<std::mutex> lock(gMutex);
-        iw = gImageWidth;
-        ih = gImageHeight;
+        const int ticks = gClock.Advance(static_cast<int64_t>(nowNs));
+        if (ticks > 0) updateDiagnosticCamera(ticks);
     }
-    if (iw <= 0 || ih <= 0) return;
-    const float scale = std::min(static_cast<float>(gWidth) / iw,
-                                 static_cast<float>(gHeight) / ih);
-    const float x = scale * iw / gWidth;
-    const float y = scale * ih / gHeight;
+    glClearColor(0.055f, 0.065f, 0.085f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (!gProgram || gPos < 0 || gUV < 0 || gSampler < 0) return;
+    uploadTexture();
+    if (!gTexture) return;
+    const float scale = std::min(static_cast<float>(gWidth) / wl4::VideoState::Width,
+                                 static_cast<float>(gHeight) / wl4::VideoState::Height);
+    const float x = scale * wl4::VideoState::Width / gWidth;
+    const float y = scale * wl4::VideoState::Height / gHeight;
     const GLfloat quad[] = {
-        -x,  y, 0.f, 0.f,  -x, -y, 0.f, 1.f,   x,  y, 1.f, 0.f,
-         x,  y, 1.f, 0.f,  -x, -y, 0.f, 1.f,   x, -y, 1.f, 1.f
+        -x, y, 0.f, 0.f, -x,-y, 0.f,1.f,  x, y, 1.f,0.f,
+         x, y, 1.f,0.f, -x,-y, 0.f,1.f,  x,-y, 1.f,1.f
     };
     glUseProgram(gProgram);
     glActiveTexture(GL_TEXTURE0);
@@ -181,6 +240,7 @@ Java_com_ylports_warioland4_MainActivity_nativeDrawFrame(JNIEnv*, jclass) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_ylports_warioland4_MainActivity_nativeSetButtons(JNIEnv*, jclass, jint buttons) {
+Java_com_ylports_warioland4_MainActivity_nativeSetButtons(JNIEnv*, jclass,
+                                                            jint buttons) {
     gButtons.store(buttons, std::memory_order_relaxed);
 }

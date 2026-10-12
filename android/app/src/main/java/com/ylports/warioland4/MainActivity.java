@@ -6,6 +6,7 @@ import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.Choreographer;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -31,6 +32,14 @@ public final class MainActivity extends Activity {
     private GLSurfaceView surface;
     private TextView status;
     private boolean pickerOpen;
+    private boolean rendering;
+    private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
+        @Override public void doFrame(long frameTimeNanos) {
+            if (!rendering || surface == null) return;
+            surface.requestRender();
+            Choreographer.getInstance().postFrameCallback(this);
+        }
+    };
 
     static {
         System.loadLibrary("wl4_native");
@@ -39,7 +48,8 @@ public final class MainActivity extends Activity {
     static native boolean nativeLoadRom(String filePath);
     static native void nativeSurfaceCreated();
     static native void nativeSurfaceChanged(int width, int height);
-    static native void nativeDrawFrame();
+    static native void nativeDrawFrame(long monotonicNanos);
+    static native void nativeResetClock();
     static native void nativeSetButtons(int buttons);
 
     @Override public void onCreate(Bundle state) {
@@ -62,10 +72,10 @@ public final class MainActivity extends Activity {
                 nativeSurfaceChanged(width, height);
             }
             @Override public void onDrawFrame(GL10 unused) {
-                nativeDrawFrame();
+                nativeDrawFrame(System.nanoTime());
             }
         });
-        surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+        surface.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
         root.addView(surface);
 
         ControlsView controls = new ControlsView(this, MainActivity::nativeSetButtons);
@@ -76,7 +86,7 @@ public final class MainActivity extends Activity {
         status.setBackgroundColor(0x88000000);
         status.setTextSize(13);
         status.setPadding(14, 8, 14, 8);
-        status.setText("Port nativo EN DESARROLLO • Solo vista previa de recursos");
+        status.setText("Diagnóstico gráfico nativo BG/OBJ • El juego todavía no se ejecuta");
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2);
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         root.addView(status, params);
@@ -160,7 +170,7 @@ public final class MainActivity extends Activity {
             status.setText("Error al validar o decodificar recursos de ROM");
             return false;
         }
-        status.setText("ROM " + version + " • Vista previa nativa 4bpp • Juego aún NO ejecutable");
+        status.setText("ROM " + version + " • Diagnóstico BG/OBJ • Cruceta mueve cámara • NO jugable");
         return true;
     }
 
@@ -179,6 +189,8 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        rendering = false;
+        Choreographer.getInstance().removeFrameCallback(frameCallback);
         nativeSetButtons(0);
         surface.onPause();
         super.onPause();
@@ -186,6 +198,11 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (surface != null) surface.onResume();
+        if (surface != null) {
+            surface.onResume();
+            nativeResetClock();
+            rendering = true;
+            Choreographer.getInstance().postFrameCallback(frameCallback);
+        }
     }
 }

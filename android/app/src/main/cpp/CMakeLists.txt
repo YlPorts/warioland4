@@ -4,6 +4,8 @@ project(wl4_native LANGUAGES CXX)
 add_library(wl4_native SHARED
     native_bridge.cpp
     rom_assets.cpp
+    gba_video.cpp
+    frame_clock.cpp
 )
 target_compile_features(wl4_native PRIVATE cxx_std_17)
 target_compile_options(wl4_native PRIVATE -Wall -Wextra -Werror=return-type)

@@ -1,53 +1,52 @@
-# Wario Land 4 — Android native port (work in progress)
+# Wario Land 4 — Android native port (in development)
 
-This branch is the **initial Android platform milestone**, not a playable port.
+## Current milestone: 0.2 video diagnostic (NOT playable)
 
-## What works (code milestone)
-- Android ARM64 application project (Java launcher + JNI/C++17 + OpenGL ES 2.0).
-- Android Storage Access Framework ROM picker on first launch.
-- ROM checksum validation: original Wario Land 4 USA/EU or JP, required from the user.
-- Reads uncompressed common sprite tiles/palette from the ROM and displays a native 4bpp tile atlas with nearest-neighbour scaling.
-- Multi-touch GBA button input collection, not yet connected to game logic.
-- Standalone native tile-decoder test.
+The Android ARM64 app and native GLES2 surface are working as a build target.
+The ROM picker accepts original MD5-matched Wario Land 4 USA/EU or Japan ROMs.
+With a ROM imported the application shows a **diagnostic** tilemap and one
+sprite made from genuine ROM tile data, not an actual game level.
+The D-pad scrolls the diagnostic tilemap and background layer.
 
-## What DOES NOT work yet
-- **No game execution.** The original game loop and logic are NOT linked.
-- GBA register/VRAM/OAM compatibility layer, background/sprite renderer and DMA.
-- VBlank/HBlank scheduling, audio/M4A, SRAM persistence.
-- Wide-screen camera, polished UI, and release signing.
+New host-native \`VideoState\` / \`GbaVideo\` renderer covers:
+- A separate VRAM (96 KiB), palette (1 KiB), OAM (1 KiB) snapshot.
+- Tiled video mode 0, four scrollable BG layers, BG 4bpp/8bpp palette decoding.
+- 32x32, 64x32, 32x64 and 64x64-tile maps, horizontal/vertical tile flips.
+- Regular OBJ sprites in 1D/2D tile layout (4bpp and 8bpp), sprite flips,
+  transparency, OAM index and BG/OBJ priority ordering.
+- Forced blank and backdrop color.
+- A native fixed-step clock using the GBA 59.7275 Hz video rate, independent
+  of a phone's 60/90/120 Hz display. Android requests rendering at vsync.
 
-The original decompilation's Makefile builds a GBA ROM with agbcc and ARM7TDMI
-hardware addresses. Its output is not a PC/Android executable. A native port
-must compile the game logic for Android and replace GBA platform dependencies;
-CPU emulation is NOT the goal of this branch.
+**IMPORTANT:** This is a video platform backend, not a CPU emulator, and it is
+**not yet connected to the decompiled Wario Land 4 game loop**. Audio, save data,
+VBlank callbacks, DMA, bitmap/affine video modes, blending, windows, mosaic,
+affine sprites, game-specific camera and full gameplay are still missing.
+The renderer's diagnostic scene is NOT a playable game or a gameplay preview.
+Do not distribute it as if it were a finished native port.
 
-## Build
+## Build and test
 
-Open the `android/` directory with Android Studio, using JDK 17+, API 36
-and NDK 27.0.12077973. Android Gradle Plugin 8.13.2 / Gradle 8.13.
+Android Studio: open \`android/\`, install Android SDK 36 and NDK 27.
+GitHub Actions on branch \`android-native\` runs host-unit tests and builds a
+debug ARM64 APK, uploaded as a clearly labeled non-playable milestone.
 
-To build with the command-line Gradle installation:
-
-```sh
-gradle -p android :app:assembleDebug
-```
-
-To test the portable ROM tile decoder on Linux:
-
-```sh
+\`\`\`sh
 c++ -std=c++17 -Wall -Wextra -Werror \
   android/app/src/main/cpp/rom_assets.cpp \
   android/tests/test_rom_assets.cpp -o /tmp/wl4-assets-test
 /tmp/wl4-assets-test
-```
 
-No commercial game files are committed or distributed. Users need their own
-original, hash-matched Wario Land 4 ROM. The native source here is preparatory;
-a successfully built APK is **not evidence** that the game runs.
+c++ -std=c++17 -Wall -Wextra -Werror \
+  android/app/src/main/cpp/gba_video.cpp \
+  android/app/src/main/cpp/frame_clock.cpp \
+  android/tests/test_gba_video.cpp -o /tmp/wl4-video-test
+/tmp/wl4-video-test
 
-## Next technical milestone
+gradle -p android --no-daemon :app:assembleDebug
+\`\`\`
 
-Port the GBA video/register interface (VRAM, palettes, tilemaps, OAM and frame
-callbacks) behind Android-native buffers/rendering, then replace the original
-game's GBA-only routines one by one. Preserve original game timing, and add
-ultrawide only after playable 240x160 rendering is validated.
+Next major step: compile actual C game logic for the Android host and replace
+its raw GBA hardware register references/interrupts with typed platform APIs.
+The decompilation's existing make target still reconstructs a GBA ROM.
+An original ROM is required only as an asset source in the Android app.
