@@ -7,6 +7,7 @@ add_library(wl4_native SHARED
     gba_video.cpp
     frame_clock.cpp
     native_memory.cpp
+    gba_bios_decode.cpp
     wl4_host_game_globals.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/init_helpers.c

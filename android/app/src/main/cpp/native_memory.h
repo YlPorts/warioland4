@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "gba_video.h"
+#include "gba_bios_decode.h"
 
 namespace wl4 {
 
@@ -23,6 +24,11 @@ public:
     bool LoadRom(std::vector<uint8_t> rom);
     bool HasRom() const { return !rom_.empty(); }
     size_t RomSize() const { return rom_.size(); }
+
+    // Decode GBA BIOS-compressed content from the owned ROM directly into a
+    // bounded host RAM or VRAM region, without partial writes on failure.
+    bool DecompressRomToMemory(size_t romOffset, uint32_t destination,
+                               Compression format, size_t maxOutput);
 
     uint8_t Read8(uint32_t address) const;
     uint16_t Read16(uint32_t address) const;

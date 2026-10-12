@@ -19,6 +19,31 @@ NativeMemory::NativeMemory() {
     SetButtons(0);
 }
 
+bool NativeMemory::DecompressRomToMemory(size_t romOffset, uint32_t destination,
+                                         Compression format, size_t maxOutput) {
+    if (romOffset >= rom_.size() || !maxOutput) return false;
+    const uint32_t bank = destination >> 24;
+    const size_t offset = destination & 0xffffffu;
+    size_t regionSize = 0;
+    if (bank == 0x02) regionSize = EwramSize;
+    else if (bank == 0x03) regionSize = IwramSize;
+    else if (bank == 0x06) regionSize = 0x18000;
+    else return false;
+
+    if (offset >= regionSize) return false;
+    const size_t available = regionSize - offset;
+    // Upper bound is further constrained by destination and a global 1MiB cap.
+    const size_t permitted = std::min({maxOutput, available, size_t{0x100000}});
+    std::vector<uint8_t> decoded;
+    if (!DecodeGbaCompressed(format, rom_.data() + romOffset,
+                             rom_.size() - romOffset, permitted, &decoded)) return false;
+    // Header validation above guarantees every write stays within one region.
+    for (size_t i = 0; i < decoded.size(); ++i) {
+        if (!Write8(destination + static_cast<uint32_t>(i), decoded[i])) return false;
+    }
+    return true;
+}
+
 bool NativeMemory::LoadRom(std::vector<uint8_t> rom) {
     if (rom.empty() || rom.size() > 0x2000000) return false;
     rom_ = std::move(rom);

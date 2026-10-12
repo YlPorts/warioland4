@@ -27,6 +27,7 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror \
             android/app/src/main/cpp/native_memory.cpp \
+            android/app/src/main/cpp/gba_bios_decode.cpp \
             android/tests/test_native_memory.cpp -o /tmp/wl4-memory-test
           /tmp/wl4-memory-test
       - name: Compile and test original decompiled fixed-point C routines
@@ -57,6 +58,21 @@ jobs:
           c++ -std=c++17 -Wall -Wextra -Werror android/tests/test_original_soft_reset.cpp \
             /tmp/wl4-main-host.o /tmp/wl4-input-host.o /tmp/wl4-global-host.o -o /tmp/wl4-reset-test
           /tmp/wl4-reset-test
+      - name: Test bounded GBA LZ77/RLE and ROM-to-host-memory decoding
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            android/app/src/main/cpp/gba_bios_decode.cpp \
+            android/app/src/main/cpp/native_memory.cpp \
+            android/tests/test_gba_bios_decode.cpp \
+            -o /tmp/wl4-decompression-test
+          /tmp/wl4-decompression-test
+      - name: Test bitmap graphics modes 3, 4 and 5
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            android/app/src/main/cpp/gba_video.cpp \
+            android/tests/test_gba_bitmap_video.cpp \
+            -o /tmp/wl4-bitmap-test
+          /tmp/wl4-bitmap-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -75,5 +91,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: warioland4-android-original-main-module-0.5-not-playable
+          name: warioland4-android-native-bios-video-0.6-not-playable
           path: android/app/build/outputs/apk/debug/app-debug.apk

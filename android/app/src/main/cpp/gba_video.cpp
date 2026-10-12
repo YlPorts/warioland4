@@ -88,6 +88,10 @@ void GbaVideo::DrawObject(const VideoState& state, int index,
     const int width = dims[shape][size][0];
     const int height = dims[shape][size][1];
 
+    // In bitmap video modes, OBJ tiles 0..511 overlap the bitmap framebuffer
+    // and cannot be referenced as sprite art.
+    if ((state.dispcnt & 7u) >= 3u && (a2 & 0x3ffu) < 512u) return;
+
     const int rawX = a1 & 511;
     const int rawY = a0 & 255;
     const int ox = rawX >= 256 ? rawX - 512 : rawX;
@@ -132,6 +136,39 @@ void GbaVideo::DrawObject(const VideoState& state, int index,
     }
 }
 
+
+void GbaVideo::DrawBitmapBackground(const VideoState& state,
+                                    std::vector<uint32_t>* rgba) {
+    const unsigned mode = state.dispcnt & 7u;
+    if (mode < 3 || mode > 5) return;
+    const bool alternatePage = (state.dispcnt & 0x10u) != 0;
+    const size_t base = (alternatePage && mode != 3) ? 0xa000u : 0;
+    const int width = mode == 5 ? 160 : VideoState::Width;
+    const int height = mode == 5 ? 128 : VideoState::Height;
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t pixel = static_cast<size_t>(y * width + x);
+            if (mode == 4) {
+                const size_t addr = base + pixel;
+                if (addr >= state.vram.size()) continue;
+                // Bitmap mode 4 index 0 is opaque, unlike tiled BG pixels.
+                (*rgba)[y * VideoState::Width + x] = Color(state, state.vram[addr]);
+                continue;
+            }
+            const size_t addr = base + pixel * 2;
+            if (addr >= state.vram.size() || state.vram.size() - addr < 2)
+                continue;
+            const uint16_t rgb = Read16(state.vram.data(), state.vram.size(), addr);
+            const uint32_t red = (rgb & 31u) * 255u / 31u;
+            const uint32_t green = ((rgb >> 5) & 31u) * 255u / 31u;
+            const uint32_t blue = ((rgb >> 10) & 31u) * 255u / 31u;
+            (*rgba)[y * VideoState::Width + x] =
+                0xff000000u | (blue << 16) | (green << 8) | red;
+        }
+    }
+}
+
 void GbaVideo::Render(const VideoState& state, std::vector<uint32_t>* rgba) const {
     if (!rgba) return;
     rgba->assign(VideoState::Width * VideoState::Height, Color(state, 0));
@@ -139,7 +176,8 @@ void GbaVideo::Render(const VideoState& state, std::vector<uint32_t>* rgba) cons
         std::fill(rgba->begin(), rgba->end(), 0xffffffffu);
         return;
     }
-    if ((state.dispcnt & 7u) != 0) return;  // Affine/bitmap modes are future milestones.
+    const unsigned mode = state.dispcnt & 7u;
+    if (mode == 1 || mode == 2 || mode >= 6) return;  // Affine modes TODO.
 
     // GBA ties: lower BG number is on top; OBJ with same priority is above BG.
     // For overlapping OBJ of equal priority, lower OAM index is in front.
@@ -147,7 +185,8 @@ void GbaVideo::Render(const VideoState& state, std::vector<uint32_t>* rgba) cons
         for (int bg = 3; bg >= 0; --bg) {
             if (!(state.dispcnt & (0x100u << bg))) continue;
             if ((state.bgcnt[bg] & 3u) != static_cast<unsigned>(priority)) continue;
-            DrawBackground(state, bg, rgba);
+            if (mode == 0) DrawBackground(state, bg, rgba);
+            else if (bg == 2) DrawBitmapBackground(state, rgba);
         }
         if (!(state.dispcnt & 0x1000u)) continue;
         for (int obj = 127; obj >= 0; --obj) {

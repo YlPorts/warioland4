@@ -34,6 +34,8 @@ private:
     static uint32_t Color(const VideoState& state, uint32_t paletteIndex);
     static void DrawBackground(const VideoState& state, int bg,
                                std::vector<uint32_t>* rgba);
+    static void DrawBitmapBackground(const VideoState& state,
+                                     std::vector<uint32_t>* rgba);
     static void DrawObject(const VideoState& state, int index,
                            std::vector<uint32_t>* rgba);
 };
