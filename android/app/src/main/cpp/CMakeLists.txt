@@ -31,3 +31,8 @@ target_compile_definitions(wl4_native PRIVATE WL4_ANDROID_NATIVE=1)
 target_compile_features(wl4_native PRIVATE cxx_std_17)
 target_compile_options(wl4_native PRIVATE -Wall -Wextra -Werror=return-type)
 target_link_libraries(wl4_native GLESv2 log)
+# NDK r27 needs explicit alignment for Android devices with 16 KiB pages.
+target_link_options(wl4_native PRIVATE
+    "-Wl,-z,max-page-size=16384"
+    "-Wl,-z,common-page-size=16384"
+)

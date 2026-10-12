@@ -46,6 +46,8 @@ and app restarts. SELECT is a recovery action for this alpha.
   are not yet faithful to the original mixer.
 - A separate worker streams stereo PCM through Android AudioTrack. Android
   backgrounding stops the worker; START freezes audio along with gameplay.
+- The ARM64 library uses 16 KiB ELF alignment. CI also checks APK ZIP
+  alignment and verifies the APK with Android's official signing tools.
 - A separate versioned `.progress` file stores entrance, player position,
   health, score, jewels, Keyzer, escape countdown, switches, broken tiles and
   collected/opened/defeated objects. It checks CRC and imported-ROM identity,

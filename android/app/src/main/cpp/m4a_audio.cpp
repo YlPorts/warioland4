@@ -37,17 +37,20 @@ bool M4aAudio::Note(const NativeMemory& memory,size_t owner,size_t index,int dur
     auto& track=songs_[owner].tracks[index];
     const auto* tone=memory.RomRange(track.voiceGroup+track.voice*12u,12);
     if(!tone)return false;
-    int key=std::clamp(int(track.key)+track.keyShift,0,127);
+    int key=track.key;
     for(int nesting=0;nesting<3 && (tone[0]&0xc0);++nesting){
+        const bool rhythm=(tone[0]&0x80)!=0;
         const uint32_t bank=le32(tone+4);
         int selection=key;
         if(tone[0]&0x40){const auto* map=memory.RomRange(le32(tone+8)+key,1);if(!map)return false;selection=*map;}
         const auto* selected=memory.RomRange(bank+uint32_t(selection)*12u,12);
         if(!selected)return false;
         tone=selected;
-        if(tone[1]!=60)key=tone[1];
+        // Only rhythm tones replace the played key; split instruments keep it.
+        if(rhythm)key=tone[1];
     }
     if(tone[0]&0xc0)return false;
+    key=std::clamp(key+track.keyShift,0,127);
     auto available=std::find_if(voices_.begin(),voices_.end(),[](const Voice& voice){return !voice.active;});
     if(available==voices_.end())available=voices_.begin()+owner*6;
     Voice voice;
