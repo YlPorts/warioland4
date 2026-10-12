@@ -130,6 +130,7 @@ bool RoomAssets::LoadInto(const NativeMemory& memory, uint8_t stageId, uint8_t r
     for (int i = 0; i < 128; ++i) put16(base_.oam.data() + i * 8, 0x0200);
 
     const uint32_t metatiles = le32(tileset + 20);
+    const uint32_t collisionTable = le32(tileset + 24);
     const uint32_t attributes = le32(tileset + 28);
     for (size_t layer = 0; layer < 3; ++layer) {
         if (!(parameters_[layer] & 0x10)) continue;
@@ -139,6 +140,7 @@ bool RoomAssets::LoadInto(const NativeMemory& memory, uint8_t stageId, uint8_t r
         const size_t count = size_t(data.map.width) * data.map.height;
         data.tiles.resize(count);
         data.attributes.resize(count);
+        data.collision.resize(count);
         for (size_t i = 0; i < count; ++i) {
             const uint16_t id = le16(data.map.bytes.data() + i * 2);
             if (id > 0x3ff) return fail(error, "Metatile index outside tileset");
@@ -148,9 +150,13 @@ bool RoomAssets::LoadInto(const NativeMemory& memory, uint8_t stageId, uint8_t r
                 return fail(error, "Metatile pointer overflow");
             const auto* tile = memory.RomRange(uint32_t(tileAddress), 8);
             const auto* attribute = memory.RomRange(uint32_t(attrAddress), 2);
-            if (!tile || !attribute) return fail(error, "Metatile table outside ROM");
+            const uint64_t collisionAddress = uint64_t(collisionTable) + id;
+            const auto* collision = collisionAddress <= UINT32_MAX ?
+                memory.RomRange(uint32_t(collisionAddress), 1) : nullptr;
+            if (!tile || !attribute || !collision) return fail(error, "Metatile table outside ROM");
             for (size_t k = 0; k < 4; ++k) data.tiles[i][k] = le16(tile + k * 2);
             data.attributes[i] = le16(attribute);
+            data.collision[i] = *collision;
         }
     }
     if (layers_[1].tiles.empty()) return fail(error, "Room missing primary background");
@@ -184,6 +190,7 @@ bool RoomAssets::LoadInto(const NativeMemory& memory, uint8_t stageId, uint8_t r
         }
     }
     roomCount_ = stage[1]; roomId_ = roomId; stageId_ = stageId;
+    roomTableIndex_ = stage[0];
     const auto* entryTable = memory.RomRange(0x0878f21cu + stage[0] * 4u, 4);
     const auto* entry = entryTable ? memory.RomRange(le32(entryTable), 12) : nullptr;
     if (!entry) return fail(error, "Room entry table outside ROM");
@@ -195,6 +202,29 @@ bool RoomAssets::LoadInto(const NativeMemory& memory, uint8_t stageId, uint8_t r
         initialCameraX_ = std::clamp(x - 120, 0, std::max(0, PixelWidth() - 240));
         initialCameraY_ = std::clamp(y - 96, 0, std::max(0, PixelHeight() - 160));
     }
+    return true;
+}
+
+uint16_t RoomAssets::AttributeAt(size_t layer, int column, int row) const {
+    const auto& data = layers_.at(layer);
+    if (column < 0 || row < 0 || column >= data.map.width || row >= data.map.height) return 0;
+    return data.attributes[size_t(row) * data.map.width + column];
+}
+
+uint8_t RoomAssets::CollisionAt(size_t layer, int column, int row) const {
+    const auto& data = layers_.at(layer);
+    if (column < 0 || row < 0 || column >= data.map.width || row >= data.map.height) return 0;
+    return data.collision[size_t(row) * data.map.width + column];
+}
+
+bool RoomAssets::ClearTile(int column, int row) {
+    auto& data = layers_[1];
+    if (column < 0 || row < 0 || column >= data.map.width || row >= data.map.height) return false;
+    const size_t index = size_t(row) * data.map.width + column;
+    data.tiles[index] = {{0x40,0x40,0x40,0x40}};
+    data.collision[index] = 0;
+    data.attributes[index] = 0;
+    data.map.bytes[index * 2] = data.map.bytes[index * 2 + 1] = 0;
     return true;
 }
 

@@ -21,13 +21,15 @@ import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 /**
- * Platform-only milestone. This does not yet execute Wario Land 4's game logic.
- * The ROM picker validates an owned, unmodified ROM and the native renderer
- * previews original rooms from that ROM.
+ * Native playable alpha with a portable subset of normal Wario movement.
+ * The ROM picker validates stock ROMs or the user's known modified ROM;
+ * the native renderer
+ * loads original rooms and animated Wario artwork from that ROM.
  */
 public final class MainActivity extends Activity {
     private static final int PICK_ROM = 10;
     private static final String US_MD5 = "5fe47355a33e3fabec2a1607af88a404";
+    private static final String USER_MD5 = "22b8707268a6c9c15cb9b8d2ec09754d";
     private static final String JP_MD5 = "99c8ad779a16be513a9fdff502b6f5c2";
     private GLSurfaceView surface;
     private TextView status;
@@ -88,7 +90,7 @@ public final class MainActivity extends Activity {
         status.setBackgroundColor(0x88000000);
         status.setTextSize(13);
         status.setPadding(14, 8, 14, 8);
-        status.setText("Escenarios nativos • El juego todavía no se ejecuta");
+        status.setText("Wario Land 4 • Alfa jugable del primer pasaje");
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2);
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         root.addView(status, params);
@@ -150,7 +152,7 @@ public final class MainActivity extends Activity {
         String version = checkRom(temporary);
         if (version == null) {
             temporary.delete();
-            status.setText("ROM incompatible (MD5). Se requiere Wario Land 4 USA/EU o JP original.");
+            status.setText("ROM incompatible. Usa Wario Land 4 USA/EU, JP o tu ROM personalizada verificada.");
             return;
         }
         File installed = new File(getFilesDir(), "baserom.gba");
@@ -173,7 +175,7 @@ public final class MainActivity extends Activity {
             status.setText("Error al validar o decodificar recursos de ROM");
             return false;
         }
-        status.setText("ROM " + version + " • Escenarios originales • Cruceta: cámara • L/R: habitación • NO jugable");
+        status.setText("ROM " + version + " • Alfa jugable • A: salto • B: embestida • L/R: correr • START: pausa • SELECT: reaparecer");
         return true;
     }
 
@@ -187,6 +189,7 @@ public final class MainActivity extends Activity {
             for (byte b : md5.digest()) digest.append(String.format(Locale.US, "%02x", b & 0xff));
             if (US_MD5.equals(digest.toString())) return "USA/EU";
             if (JP_MD5.equals(digest.toString())) return "JP";
+            if (USER_MD5.equals(digest.toString())) return "USA personalizada";
         } catch (Exception ignored) {}
         return null;
     }

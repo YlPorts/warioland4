@@ -24,6 +24,7 @@ struct RoomLayer {
     RoomBackground map;
     std::vector<std::array<uint16_t, 4>> tiles;
     std::vector<uint16_t> attributes;
+    std::vector<uint8_t> collision;
 };
 
 // Original room headers are read field-by-field using their 44-byte GBA ABI,
@@ -41,6 +42,11 @@ public:
     int InitialCameraX() const { return initialCameraX_; }
     int InitialCameraY() const { return initialCameraY_; }
     const RoomLayer& Layer(size_t index) const { return layers_.at(index); }
+    uint8_t LayerParameter(size_t index) const { return parameters_.at(index); }
+    uint8_t RoomTableIndex() const { return roomTableIndex_; }
+    uint16_t AttributeAt(size_t layer, int column, int row) const;
+    uint8_t CollisionAt(size_t layer, int column, int row) const;
+    bool ClearTile(int column, int row);
 
 private:
     bool LoadInto(const NativeMemory& memory, uint8_t stageId, uint8_t roomId,
@@ -49,6 +55,7 @@ private:
     std::array<RoomLayer, 3> layers_{};
     std::array<uint8_t, 4> parameters_{};
     uint8_t scrolling_ = 0, roomCount_ = 0, roomId_ = 0, stageId_ = 0;
+    uint8_t roomTableIndex_ = 0;
     int initialCameraX_ = 0, initialCameraY_ = 0;
 };
 

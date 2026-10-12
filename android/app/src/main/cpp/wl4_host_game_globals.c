@@ -1,4 +1,6 @@
 #include "wl4_host_game.h"
+u8 wl4HostBlockDamageTimer = 0;
+u8 gSwitchStates[5] = {0};
 
 volatile u16 wl4HostKeyInput = 0xffff;
 volatile u16 wl4HostIrqFlags = 0;

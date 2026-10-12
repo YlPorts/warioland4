@@ -1,12 +1,24 @@
+#ifdef WL4_ANDROID_NATIVE
+#include "wl4_host_game.h"
+#else
 #include "bg_clip.h"
 #include "game_screen_helpers.h"
 #include "main.h"
 #include "wario.h"
 
+#endif
+
+#ifdef WL4_ANDROID_NATIVE
+#define WL4_BLOCK_DAMAGE_TIMER wl4HostBlockDamageTimer
+#else
+#define WL4_BLOCK_DAMAGE_TIMER gWarioData.damageTimer
+#endif
+
 #define BLOCK_SOLID_FLAG 0x01000000
 #define BLOCK_TILE_SIZE 64
 #define BLOCK_TILE_MASK 63
 
+#ifndef WL4_ANDROID_NATIVE
 struct BlockCollisionContext {
     s32 tileType;
     s32 localX;
@@ -15,7 +27,10 @@ struct BlockCollisionContext {
     s32 switchCollisionType;
     s32 isSprite;
 };
+#endif
 
+
+#ifndef WL4_ANDROID_NATIVE
 typedef s32 (*BlockCollisionHandler)(struct BlockCollisionContext* context);
 
 extern const BlockCollisionHandler sBlockCollisionHandlers[];
@@ -185,6 +200,8 @@ s32 GetSpriteBlockCollisionAtPosition(u16 y, u16 x)
     return layer;
 }
 
+#endif
+
 s32 GetNonSolidBlockCollision(struct BlockCollisionContext* context)
 {
     return context->tileType;
@@ -272,7 +289,7 @@ s32 GetDamagedWarioOnlyBlockCollision(struct BlockCollisionContext* context)
     s32 result;
 
     result = 0;
-    if (context->isSprite == 0 && gWarioData.damageTimer != 0) {
+    if (context->isSprite == 0 && WL4_BLOCK_DAMAGE_TIMER != 0) {
         context->tileType = 1;
         result = GetSolidBlockCollision(context);
     } else {
@@ -302,7 +319,7 @@ s32 GetDamagedWarioOrSpriteBlockCollision(struct BlockCollisionContext* context)
     s32 result;
 
     result = 0;
-    if (context->isSprite == 0 && gWarioData.damageTimer == 0) {
+    if (context->isSprite == 0 && WL4_BLOCK_DAMAGE_TIMER == 0) {
         context->tileType = result;
         result = GetNonSolidBlockCollision(context);
     } else {
@@ -436,3 +453,29 @@ s32 GetSwitchBlockCollision(struct BlockCollisionContext* context)
 done:
     return result;
 }
+
+#ifdef WL4_ANDROID_NATIVE
+s32 wl4HostBlockCollision(u8 type, u8 localX, u8 localY)
+{
+    struct BlockCollisionContext context = {0};
+    context.tileType = type;
+    context.localX = localX & BLOCK_TILE_MASK;
+    context.localY = localY & BLOCK_TILE_MASK;
+    switch (type) {
+        case 0: return GetNonSolidBlockCollision(&context);
+        case 1: return GetSolidBlockCollision(&context);
+        case 2: return GetDownRightSlopeCollision(&context);
+        case 3: return GetDownLeftSlopeCollision(&context);
+        case 4: return GetUpperShallowDownRightSlopeCollision(&context);
+        case 5: return GetLowerShallowDownRightSlopeCollision(&context);
+        case 6: return GetLowerShallowDownLeftSlopeCollision(&context);
+        case 7: return GetUpperShallowDownLeftSlopeCollision(&context);
+        case 8: return GetDamagedWarioOnlyBlockCollision(&context);
+        case 9: return GetSpriteOnlySolidBlockCollision(&context);
+        case 10: return GetDamagedWarioOrSpriteBlockCollision(&context);
+        case 11: return GetEmptyBlockCollision(&context);
+        case 12: return GetNonSolidBlockCollision(&context);
+        default: return GetSwitchBlockCollision(&context);
+    }
+}
+#endif

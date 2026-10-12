@@ -12,7 +12,7 @@
 #include "frame_clock.h"
 #include "gba_video.h"
 #include "native_memory.h"
-#include "room_assets.h"
+#include "native_game.h"
 #include <string>
 
 extern "C" {
@@ -28,20 +28,19 @@ wl4::NativeMemory gMemory;
 std::string gSavePath;
 wl4::VideoState gState;
 wl4::GbaVideo gVideo;
-wl4::RoomAssets gRoom;
+wl4::NativeGame gGame;
 wl4::FrameClock gClock;
 std::vector<uint32_t> gPixels;
 bool gSceneLoaded = false;
 bool gUploadPending = false;
-int gCameraBaseX = 0;
-int gCameraBaseY = 0;
 
 GLuint gTexture = 0;
+bool gTextureAllocated = false;
 GLuint gProgram = 0;
 GLint gPos = -1, gUV = -1, gSampler = -1;
 int gWidth = 1, gHeight = 1;
 
-// Native room preview. Gameplay logic is not connected yet.
+// Native playable alpha: portable Wario movement over original room assets.
 // Bridge the *original* InitializeVideoMemory() function to host RAM.
 int hostDmaFill(void* context, uint32_t address, uint32_t pattern,
                 uint32_t bytes, uint32_t unitBytes) {
@@ -52,20 +51,18 @@ int hostDmaFill(void* context, uint32_t address, uint32_t pattern,
 
 bool buildRoomScene() {
     std::string error;
-    if (!gRoom.Load(gMemory, 0, 0, &error)) {
-        LOGE("First room load failed: %s", error.c_str());
+    if (!gGame.Start(gMemory, &error)) {
+        LOGE("Native game startup failed: %s", error.c_str());
         return false;
     }
     wl4HostSetDmaFillHandler(&gMemory, hostDmaFill);
     InitializeVideoMemory();
     wl4::VideoState state;
-    gCameraBaseX = gRoom.InitialCameraX();
-    gCameraBaseY = gRoom.InitialCameraY();
-    gRoom.BuildVideo(gCameraBaseX, gCameraBaseY, &state);
+    gGame.BuildVideo(&state);
     gScreenShakeX = {};
     gScreenShakeY = {};
     gButtonsHeld = gButtonsHeldCopy = gButtonsPressed = 0;
-    gMainGameMode = GM_CUTSCENE;
+    gMainGameMode = GM_GAME_SCREEN;
     gDisableSoftReset = 0;
     gInterruptCheck = 0;
     wl4HostIrqFlags = 0;
@@ -138,51 +135,37 @@ void uploadTexture() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, wl4::VideoState::Width,
-                 wl4::VideoState::Height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                 gPixels.data());
+    if (!gTextureAllocated) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, wl4::VideoState::Width,
+                     wl4::VideoState::Height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     gPixels.data());
+        gTextureAllocated = true;
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, wl4::VideoState::Width,
+                        wl4::VideoState::Height, GL_RGBA, GL_UNSIGNED_BYTE,
+                        gPixels.data());
+    }
     gUploadPending = false;
 }
 
-void updateRoomPreview(int ticks) {
+void updateNativeGame(int ticks) {
     if (!gSceneLoaded) return;
-    bool redraw = false;
-    // Call the original decompiled input and interrupt handlers once
-    // per logical frame instead of tying game ticks to the Android refresh rate.
     for (int frame = 0; frame < ticks; ++frame) {
         wl4HostKeyInput = gMemory.Read16(0x04000130);
         PollInput();
-        CheckSoftReset(); // original src/main.c function
+        CheckSoftReset();
         if (gMainGameMode == GM_SOFT_RESET) {
-            gMainGameMode = GM_CUTSCENE;
-            gCameraBaseX = gRoom.InitialCameraX();
-            gCameraBaseY = gRoom.InitialCameraY();
-            redraw = true;
-        }
-        if (gButtonsPressed & (256u | 512u)) {
-            const int direction = (gButtonsPressed & 256u) ? 1 : -1;
-            const int next = (gRoom.RoomId() + direction + gRoom.RoomCount()) % gRoom.RoomCount();
             std::string error;
-            if (gRoom.Load(gMemory, gRoom.StageId(), static_cast<uint8_t>(next), &error)) {
-                gCameraBaseX = gRoom.InitialCameraX();
-                gCameraBaseY = gRoom.InitialCameraY();
-                redraw = true;
-            } else LOGE("Room load failed: %s", error.c_str());
+            if (!gGame.Start(gMemory, &error)) {
+                LOGE("Reset failed: %s", error.c_str());
+            }
+            gMainGameMode = GM_GAME_SCREEN;
         }
-        const int dx = ((gButtonsHeld & 16u) != 0) - ((gButtonsHeld & 32u) != 0);
-        const int dy = ((gButtonsHeld & 128u) != 0) - ((gButtonsHeld & 64u) != 0);
-        const int x = std::clamp(gCameraBaseX + dx * 2, 0, std::max(0, gRoom.PixelWidth() - 240));
-        const int y = std::clamp(gCameraBaseY + dy * 2, 0, std::max(0, gRoom.PixelHeight() - 160));
-        if (x != gCameraBaseX || y != gCameraBaseY) {
-            gCameraBaseX = x; gCameraBaseY = y;
-            redraw = true;
-        }
+        gGame.Tick(gMemory, gButtonsHeld);
         gInterruptCheck = 0;
         InterruptCallbackCallVBlank();
     }
-    if (!redraw) return;
-    gRoom.BuildVideo(gCameraBaseX, gCameraBaseY, &gState);
-    gMemory.InstallVideoState(gState);
+    gGame.BuildVideo(&gState);
     gVideo.Render(gState, &gPixels);
     gUploadPending = true;
 }
@@ -215,6 +198,7 @@ Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstr
 extern "C" JNIEXPORT void JNICALL
 Java_com_ylports_warioland4_MainActivity_nativeSurfaceCreated(JNIEnv*, jclass) {
     gTexture = 0;
+    gTextureAllocated = false;
     gProgram = 0;
     makeProgram();
     std::lock_guard<std::mutex> lock(gMutex);
@@ -241,7 +225,7 @@ Java_com_ylports_warioland4_MainActivity_nativeDrawFrame(JNIEnv*, jclass,
     {
         std::lock_guard<std::mutex> lock(gMutex);
         const int ticks = gClock.Advance(static_cast<int64_t>(nowNs));
-        if (ticks > 0) updateRoomPreview(ticks);
+        if (ticks > 0) updateNativeGame(ticks);
     }
     glClearColor(0.055f, 0.065f, 0.085f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);

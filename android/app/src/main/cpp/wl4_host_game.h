@@ -68,6 +68,14 @@ void InitializeVideoMemory(void);
 u32 GetBackgroundScreenSize(u8 parameter);
 u32 DecompressRoomBackground(u8 type, const u8* source, u8* destination);
 
+// Original block.c point collision kernels, including six slope shapes.
+struct BlockCollisionContext {
+    s32 tileType, localX, localY, switchIndex, switchCollisionType, isSprite;
+};
+extern u8 wl4HostBlockDamageTimer;
+extern u8 gSwitchStates[5];
+s32 wl4HostBlockCollision(u8 type, u8 localX, u8 localY);
+
 // Wario Land 4's original main.c mode values and soft-reset button handler.
 enum {
     GM_CUTSCENE = 0, GM_STAGE_SELECT = 1, GM_GAME_SCREEN = 2,
