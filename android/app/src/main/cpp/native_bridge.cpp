@@ -50,12 +50,28 @@ void write16(uint8_t* p, size_t at, uint16_t val) {
 
 // A diagnostic scene built from original tiles. This is NOT the game engine;
 // it checks palette/VRAM/OAM/camera functionality while porting the C logic.
-void buildDiagnosticScene(const std::vector<uint8_t>& rom) {
-    wl4::VideoState state;
-    std::copy_n(rom.begin() + kPaletteOffset, 128, state.palette.begin());
-    std::copy_n(rom.begin() + kPaletteOffset, 128, state.palette.begin() + 0x200);
-    std::copy_n(rom.begin() + kTileOffset, kTileBytes, state.vram.begin());
-    std::copy_n(rom.begin() + kTileOffset, kTileBytes, state.vram.begin() + 0x10000);
+// Bridge the *original* InitializeVideoMemory() function to host RAM.
+int hostDmaFill(void* context, uint32_t address, uint32_t pattern,
+                uint32_t bytes, uint32_t unitBytes) {
+    if (!context) return 0;
+    return static_cast<wl4::NativeMemory*>(context)->FillRegion(
+        address, pattern, bytes, unitBytes) ? 1 : 0;
+}
+
+// The artwork is still a diagnostic, but loading now uses host DMA copies
+// from the imported ROM and the original game initialization routine.
+bool buildDiagnosticScene() {
+    wl4HostSetDmaFillHandler(&gMemory, hostDmaFill);
+    InitializeVideoMemory(); // Original src/init_helpers.c implementation.
+    const uint32_t palette = 0x08000000u + static_cast<uint32_t>(kPaletteOffset);
+    const uint32_t tiles = 0x08000000u + static_cast<uint32_t>(kTileOffset);
+    if (!gMemory.CopyRegion(palette, 0x05000000u, 128, 2) ||
+        !gMemory.CopyRegion(palette, 0x05000200u, 128, 2) ||
+        !gMemory.CopyRegion(tiles, 0x06000000u, kTileBytes, 4) ||
+        !gMemory.CopyRegion(tiles, 0x06010000u, kTileBytes, 4)) {
+        return false;
+    }
+    wl4::VideoState state = gMemory.CaptureVideo();
 
     // Use tiled mode 0, 1D sprite mapping, BG0/BG1 + OBJ.
     state.dispcnt = 0x40 | 0x100 | 0x200 | 0x1000;
@@ -94,6 +110,7 @@ void buildDiagnosticScene(const std::vector<uint8_t>& rom) {
     gSceneLoaded = true;
     gUploadPending = true;
     gClock.Reset();
+    return true;
 }
 
 GLuint shader(GLenum type, const char* code) {
@@ -225,8 +242,8 @@ Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstr
     if (!in.read(reinterpret_cast<char*>(rom.data()), length)) return JNI_FALSE;
     {
         std::lock_guard<std::mutex> lock(gMutex);
-        if (!gMemory.LoadRom(rom)) return JNI_FALSE;
-        buildDiagnosticScene(rom);
+        if (!gMemory.LoadRom(std::move(rom))) return JNI_FALSE;
+        if (!buildDiagnosticScene()) return JNI_FALSE;
     }
     return JNI_TRUE;
 }

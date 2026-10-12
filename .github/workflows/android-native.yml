@@ -73,6 +73,19 @@ jobs:
             android/tests/test_gba_bitmap_video.cpp \
             -o /tmp/wl4-bitmap-test
           /tmp/wl4-bitmap-test
+      - name: Test original game video initialization using bounded native DMA
+        run: |
+          cc -std=gnu11 -DWL4_ANDROID_NATIVE -Iandroid/app/src/main/cpp -Wall -Wextra -Werror \
+            -c src/init_helpers.c -o /tmp/wl4-video-init.o
+          cc -std=gnu11 -DWL4_ANDROID_NATIVE -Iandroid/app/src/main/cpp -Wall -Wextra -Werror \
+            -c android/app/src/main/cpp/wl4_host_game_globals.c -o /tmp/wl4-video-globals.o
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            android/app/src/main/cpp/native_memory.cpp \
+            android/app/src/main/cpp/gba_bios_decode.cpp \
+            android/tests/test_dma_and_original_video_init.cpp \
+            /tmp/wl4-video-init.o /tmp/wl4-video-globals.o \
+            -o /tmp/wl4-native-dma-test
+          /tmp/wl4-native-dma-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -91,5 +104,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: warioland4-android-native-bios-video-0.6-not-playable
+          name: warioland4-android-original-video-dma-0.7-not-playable
           path: android/app/build/outputs/apk/debug/app-debug.apk

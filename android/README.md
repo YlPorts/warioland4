@@ -1,72 +1,48 @@
-# Wario Land 4 Android — ARM64 port, milestone 0.4
+# Wario Land 4 — Android ARM64 native port, milestone 0.7
 
-**NOT PLAYABLE.** This app currently renders an original-asset tile diagnostic scene.
-It is not executing original levels, Wario physics or the game state machine.
+**Current state: NOT PLAYABLE.** This still displays a diagnostic tile
+scene based on original ROM graphics. It does not yet load or execute actual
+rooms, Wario physics, enemies, audio or the original main game loop.
 
-## Actual decompiled game C now linked into the Android native .so
+## New in 0.7
 
-- `src/fixed_point.c` — original arithmetic (already linked in v0.3).
-- `src/init_helpers.c` — original `PollInput` with pressed-edge detection.
-- `src/screen_shake.c` — original shake request/update behavior.
-- `src/interrupt_callbacks.c` — original VBlank/HBlank/VCount dispatch.
+- The **real `InitializeVideoMemory()` function from `src/init_helpers.c`**
+  now runs on the Android ARM64 build. This is the original game's routine,
+  not a reimplementation.
+- The original routine's DMA fill macros are redirected to a typed callback
+  backed by `NativeMemory::FillRegion()`, with checked 16-bit and 32-bit
+  repeated patterns. Video initialization now clears VRAM, palette, OAM.
+- `NativeMemory::CopyRegion()` moves actual asset bytes from the
+  original imported ROM into BG/OBJ VRAM and palettes. Diagnostic graphics
+  now use these native DMA-like transfers rather than directly copying
+  extracted arrays into a prebuilt video snapshot.
+- Copy/fill operations enforce alignment, size, physical bank boundaries,
+  legal writable memory regions and reject invalid transfers before writing.
+  Overlapping copies use an atomic source snapshot.
+- CI exercises the original video initialization end-to-end, verifies
+  exact clear patterns and tests invalid/overlapping transfers.
 
-`WL4_ANDROID_NATIVE` guards switch only platform-dependent includes and
-unported GBA helper functions. Original implementations of the selected
-functions remain unchanged and the normal GBA build retains its original path.
+## Previously integrated
 
-The Android diagnostic now runs the original input and shake functions once
-per logical GBA tick, with A/B causing shake and D-pad scrolling the native
-tilemap. VBlank is signaled through the decompiled callback dispatcher.
-This **does not** mean the original game loop is operational.
+Native GLES2 video renderer for tiled BG and OBJ sprites plus bitmap modes
+3/4/5; native GBA-style memory, ROM picker with ROM hash verification,
+safe LZ77/RLE decoder, frame clock, SRAM storage infrastructure.
+Original C modules compiled for ARM64: `fixed_point.c`, `PollInput`,
+screen shaking, VBlank/HBlank/VCount callbacks, `CheckSoftReset`, now
+`InitializeVideoMemory`. These functions are genuine decompiled code.
 
-The host memory backend, VRAM/OAM tile renderer, ROM importer, original
-ROM checksum checks and SRAM storage scaffolding are unchanged from v0.3.
+## Still required to boot the real game
 
-## Remaining work before actual gameplay
+1. Port ROM level asset addresses, BIOS/DMA callers and raw GBA pointers to
+   safe host memory or native game-state structures.
+2. Port `InitializeGame`, `AgbMain`'s game-mode dispatch, cutscenes,
+   menus, camera, collision, level loading, sprites and Wario movement.
+3. Translate sound/M4A, game saves, additional graphics features and all
+   platform IRQ semantics.
+4. Validate gameplay on a real Android device; only then optimize
+   widescreen, smooth frame pacing and production APK signing.
 
-- Replace game logic's ARM7 inline asm and hardcoded GBA pointers.
-- Safely translate DMA, decompression, interrupts and GBA BIOS services.
-- Integrate the original `AgbMain` state machine at native frame ticks.
-- Implement original level loading, collision/physics, OBJ effects, music,
-  room transitions and proper SRAM game save compatibility.
-- Validate on a physical Android device, then build ultrawide support.
-
-No copyrighted ROM content is distributed. The CI debug APK is a
-**non-playable development checkpoint**, not a release.
-See `.github/workflows/android-native.yml` for build and tests.
-
-## 0.5 — Original main.c handler linked
-
-The Android ARM64 build now compiles `src/main.c` in a guarded host mode.
-Only the original `CheckSoftReset` function, `gMainGameMode`, and
-`gDisableSoftReset` are enabled so far. A+B+Start+Select exercises
-the original handler. The full `AgbMain` loop and other game systems
-remain GBA-only. This is an incremental native game-code milestone
-and **does not run levels**.
-
-## 0.6 — GBA BIOS data decompression and bitmap graphics (host-native)
-
-The Android binary now includes a **bounded native decoder** for actual GBA
-BIOS-compressed data: LZ77 (header 0x10) and Run Length (header 0x30).
-It supports overlapping LZ77 back-references and rejects invalid headers,
-truncated inputs, zero-length/oversize outputs, invalid references and writes
-that exceed a chosen EWRAM/IWRAM/VRAM memory region.
-
-`NativeMemory::DecompressRomToMemory` reads compressed data *from the
-user-imported original ROM* and only commits its output after successful
-validation. This forms a reusable primitive for original stage/tilemap
-asset-loading routines later; stage loading itself is still unported.
-
-The software GBA video backend now also draws:
-- Mode 3: 240×160 RGB555 frame buffer.
-- Mode 4: 240×160 indexed pixels, including both frame pages.
-- Mode 5: 160×128 RGB555 frame pages with GBA backdrop outside viewport.
-- Normal OBJ priority layering in bitmap modes, with OBJ tile #0–511 guarded.
-
-The existing original C modules (input, screen shake, VBlank callback,
-fixed-point arithmetic and main.c soft-reset handler) remain linked.
-**No actual gameplay or level selection yet.** Affine layers, GBA audio,
-game-save calls, game-engine boot sequence, DMA simulation and the large
-remaining ARM7-specific C game logic still need host adaptations.
-
-A build success indicates a working ARM64 development APK, not a playable game.
+Open `android/` in Android Studio, or download the labeled *not-playable*
+development APK from the `android-native` GitHub Actions workflow.
+No proprietary ROM assets are included in the APK; a user-owned original
+US/EU or Japan ROM must be provided.

@@ -45,6 +45,27 @@ extern u16 gButtonsHeldCopy;
 extern u16 gButtonsPressed;
 void PollInput(void);
 
+// Original InitializeVideoMemory uses these GBA DMA macros. The callbacks
+// bridge its 16/32-bit fills to bounded NativeMemory instead of MMIO.
+#define VRAM 0x06000000u
+#define VRAM_SIZE 0x18000u
+#define OAM 0x07000000u
+#define OAM_SIZE 0x400u
+#define PLTT 0x05000000u
+#define PLTT_SIZE 0x400u
+#define U8_MAX 255u
+typedef int (*Wl4HostDmaFillHandler)(void *context, uint32_t address,
+                                    uint32_t pattern, uint32_t bytes,
+                                    uint32_t unitBytes);
+void wl4HostSetDmaFillHandler(void *context, Wl4HostDmaFillHandler callback);
+void wl4HostDmaFill16(unsigned int channel, uint32_t pattern, uint32_t address, uint32_t bytes);
+void wl4HostDmaFill32(unsigned int channel, uint32_t pattern, uint32_t address, uint32_t bytes);
+#define DmaFill16(channel, pattern, address, bytes) \
+    wl4HostDmaFill16((channel), (pattern), (address), (bytes))
+#define DmaFill32(channel, pattern, address, bytes) \
+    wl4HostDmaFill32((channel), (pattern), (address), (bytes))
+void InitializeVideoMemory(void);
+
 // Wario Land 4's original main.c mode values and soft-reset button handler.
 enum {
     GM_CUTSCENE = 0, GM_STAGE_SELECT = 1, GM_GAME_SCREEN = 2,

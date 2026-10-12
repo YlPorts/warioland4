@@ -36,6 +36,12 @@ public:
     bool Write8(uint32_t address, uint8_t value);
     bool Write16(uint32_t address, uint16_t value);
     bool Write32(uint32_t address, uint32_t value);
+    // Bounded, transactional host-native equivalents of DMA 16/32bit copy/fill.
+    // An invalid transfer does not partially mutate the destination.
+    bool FillRegion(uint32_t destination, uint32_t pattern,
+                    size_t bytes, size_t unitBytes);
+    bool CopyRegion(uint32_t source, uint32_t destination,
+                    size_t bytes, size_t unitBytes);
     void SetButtons(uint16_t pressed);
     uint16_t ButtonsHeld() const { return buttonsHeld_; }
     VideoState CaptureVideo() const;

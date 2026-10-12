@@ -32,7 +32,6 @@ void PollInput(void)
     gButtonsHeldCopy = gButtonsHeld = keys;
 }
 
-#ifndef WL4_ANDROID_NATIVE
 void InitializeVideoMemory(void)
 {
     DmaFill16(3, 0, VRAM, VRAM_SIZE);
@@ -40,6 +39,7 @@ void InitializeVideoMemory(void)
     DmaFill16(3, 0, PLTT, PLTT_SIZE);
 }
 
+#ifndef WL4_ANDROID_NATIVE
 void InitializeInterruptHandler(void)
 {
     DmaCopy16(3, irq_handler, gInterruptHandlerBuffer, sizeof(gInterruptHandlerBuffer));

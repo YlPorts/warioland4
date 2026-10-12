@@ -9,6 +9,32 @@
 namespace wl4 {
 namespace {
 constexpr uint32_t kKeyInput = 0x04000130;
+// DMA uses physically contiguous memory. Refuse mirroring or crossing a bank
+// boundary instead of emulating an arbitrary hardware bus access.
+bool validSpan(uint32_t address, size_t bytes, size_t unit,
+               bool writable, size_t romSize) {
+    if (!bytes || bytes > 0x100000 || (unit != 2 && unit != 4) ||
+        (bytes % unit) || (address % unit)) return false;
+    const uint32_t bank = address >> 24;
+    const size_t offset = address & 0xffffffu;
+    size_t capacity = 0;
+    switch (bank) {
+        case 0x02: capacity = 0x40000; break;
+        case 0x03: capacity = 0x8000; break;
+        case 0x05: capacity = 0x400; break;
+        case 0x06: capacity = 0x18000; break;
+        case 0x07: capacity = 0x400; break;
+        case 0x08: case 0x09: case 0x0a:
+        case 0x0b: case 0x0c: case 0x0d:
+            if (writable) return false;
+            capacity = romSize;
+            // Every ROM bank uses a separate 32MiB window.
+            return (address & 0x1ffffffu) <= capacity &&
+                   bytes <= capacity - (address & 0x1ffffffu);
+        default: return false;
+    }
+    return offset <= capacity && bytes <= capacity - offset;
+}
 uint16_t readLe16(const uint8_t* data) {
     return static_cast<uint16_t>(data[0] | (static_cast<uint16_t>(data[1]) << 8));
 }
@@ -40,6 +66,35 @@ bool NativeMemory::DecompressRomToMemory(size_t romOffset, uint32_t destination,
     // Header validation above guarantees every write stays within one region.
     for (size_t i = 0; i < decoded.size(); ++i) {
         if (!Write8(destination + static_cast<uint32_t>(i), decoded[i])) return false;
+    }
+    return true;
+}
+
+bool NativeMemory::FillRegion(uint32_t destination, uint32_t pattern,
+                              size_t bytes, size_t unitBytes) {
+    if (!validSpan(destination, bytes, unitBytes, true, rom_.size()))
+        return false;
+    for (size_t offset = 0; offset < bytes; offset += unitBytes) {
+        // All writes are known valid before entering this loop.
+        for (size_t b = 0; b < unitBytes; ++b) {
+            if (!Write8(destination + static_cast<uint32_t>(offset + b),
+                        static_cast<uint8_t>(pattern >> (8 * b)))) return false;
+        }
+    }
+    return true;
+}
+
+bool NativeMemory::CopyRegion(uint32_t source, uint32_t destination,
+                              size_t bytes, size_t unitBytes) {
+    if (!validSpan(source, bytes, unitBytes, false, rom_.size()) ||
+        !validSpan(destination, bytes, unitBytes, true, rom_.size()))
+        return false;
+    std::vector<uint8_t> snapshot(bytes);
+    for (size_t i = 0; i < bytes; ++i)
+        snapshot[i] = Read8(source + static_cast<uint32_t>(i));
+    for (size_t i = 0; i < bytes; ++i) {
+        if (!Write8(destination + static_cast<uint32_t>(i), snapshot[i]))
+            return false;
     }
     return true;
 }
