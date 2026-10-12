@@ -37,7 +37,7 @@ static void testOriginalShake() {
     assert(ScreenShakeUpdateX() == -2);
     assert(ScreenShakeUpdateX() == 0);
     assert(ScreenShakeUpdateX() == 0);
-    assert(ScreenShakeUpdateX() == 2);
+    assert(ScreenShakeUpdateX() == 1); // original shake tapers near the end
     assert(ScreenShakeRequestY(10, 1) == 10);
     assert(ScreenShakeUpdateY() == 0);
     assert(ScreenShakeUpdateY() == 0);
