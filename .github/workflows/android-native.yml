@@ -23,6 +23,19 @@ jobs:
             android/app/src/main/cpp/frame_clock.cpp \
             android/tests/test_gba_video.cpp -o /tmp/wl4-video-test
           /tmp/wl4-video-test
+      - name: Test native memory bus, input registers and SRAM persistence
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            android/app/src/main/cpp/native_memory.cpp \
+            android/tests/test_native_memory.cpp -o /tmp/wl4-memory-test
+          /tmp/wl4-memory-test
+      - name: Compile and test original decompiled fixed-point C routines
+        run: |
+          cc -std=gnu11 -Iinclude -Wall -Wextra -c src/fixed_point.c -o /tmp/wl4-fixed-point.o
+          c++ -std=c++17 -Wall -Wextra -Werror -Iinclude \
+            android/tests/test_original_fixed_point.cpp /tmp/wl4-fixed-point.o \
+            -o /tmp/wl4-fixed-point-test
+          /tmp/wl4-fixed-point-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -41,5 +54,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: warioland4-android-foundation-debug-not-playable
+          name: warioland4-android-memory-host-debug-not-playable
           path: android/app/build/outputs/apk/debug/app-debug.apk

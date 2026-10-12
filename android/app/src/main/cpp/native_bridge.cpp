@@ -11,6 +11,12 @@
 
 #include "frame_clock.h"
 #include "gba_video.h"
+#include "native_memory.h"
+#include <string>
+
+extern "C" {
+#include "fixed_point.h"
+}
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "wl4-native", __VA_ARGS__)
 
@@ -20,6 +26,8 @@ constexpr size_t kTileOffset = 0x400AE8;     // common_sprites.4bpp (US/JP)
 constexpr size_t kTileBytes = 0x3000;
 constexpr size_t kTileCount = kTileBytes / 32;
 std::mutex gMutex;
+wl4::NativeMemory gMemory;
+std::string gSavePath;
 wl4::VideoState gState;
 wl4::GbaVideo gVideo;
 wl4::FrameClock gClock;
@@ -69,7 +77,8 @@ void buildDiagnosticScene(const std::vector<uint8_t>& rom) {
     write16(state.oam.data(), 0, 64);          // sprite Y
     write16(state.oam.data(), 2, 104 | 0x8000); // size=2 (32x32)
     write16(state.oam.data(), 4, 32 | 0x0000);  // tile 32, priority 0
-    gState = std::move(state);
+    gMemory.InstallVideoState(state);
+    gState = gMemory.CaptureVideo();
     gVideo.Render(gState, &gPixels);
     gSceneLoaded = true;
     gUploadPending = true;
@@ -147,11 +156,19 @@ void updateDiagnosticCamera(int ticks) {
     const int dx = ((buttons & 16) != 0) - ((buttons & 32) != 0);
     const int dy = ((buttons & 128) != 0) - ((buttons & 64) != 0);
     if (!dx && !dy) return;
-    gState.hofs[0] = static_cast<uint16_t>(gState.hofs[0] + dx * ticks * 2);
-    gState.vofs[0] = static_cast<uint16_t>(gState.vofs[0] + dy * ticks * 2);
-    // Parallax is only a native test; these are not Wario Land 4 camera rules.
-    gState.hofs[1] = gState.hofs[0] / 2;
-    gState.vofs[1] = gState.vofs[0] / 2;
+    // Link the original src/fixed_point.c into the ARM64 binary: this is
+    // actual decompiled game arithmetic (not a rewritten demo math routine).
+    const int16_t step = Q_8_8(0.5);
+    const int deltaX = FixedMul(dx * 4 * ticks, step);
+    const int deltaY = FixedMul(dy * 4 * ticks, step);
+    const uint16_t x = static_cast<uint16_t>(gMemory.Read16(0x04000010) + deltaX);
+    const uint16_t y = static_cast<uint16_t>(gMemory.Read16(0x04000012) + deltaY);
+    gMemory.Write16(0x04000010, x);
+    gMemory.Write16(0x04000012, y);
+    // Parallax is only a video diagnostic; not actual game camera behavior.
+    gMemory.Write16(0x04000014, x / 2);
+    gMemory.Write16(0x04000016, y / 2);
+    gState = gMemory.CaptureVideo();
     gVideo.Render(gState, &gPixels);
     gUploadPending = true;
 }
@@ -175,6 +192,7 @@ Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstr
     if (!in.read(reinterpret_cast<char*>(rom.data()), length)) return JNI_FALSE;
     {
         std::lock_guard<std::mutex> lock(gMutex);
+        if (!gMemory.LoadRom(rom)) return JNI_FALSE;
         buildDiagnosticScene(rom);
     }
     return JNI_TRUE;
@@ -243,4 +261,26 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_ylports_warioland4_MainActivity_nativeSetButtons(JNIEnv*, jclass,
                                                             jint buttons) {
     gButtons.store(buttons, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(gMutex);
+    gMemory.SetButtons(static_cast<uint16_t>(buttons));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_ylports_warioland4_MainActivity_nativeSetSavePath(JNIEnv* env, jclass,
+                                                              jstring path) {
+    if (!path) return JNI_FALSE;
+    const char* name = env->GetStringUTFChars(path, nullptr);
+    if (!name) return JNI_FALSE;
+    const std::string newPath(name);
+    env->ReleaseStringUTFChars(path, name);
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (!gMemory.LoadSaveFile(newPath)) return JNI_FALSE;
+    gSavePath = newPath;
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_ylports_warioland4_MainActivity_nativeFlushSave(JNIEnv*, jclass) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    return !gSavePath.empty() && gMemory.FlushSaveFile(gSavePath);
 }

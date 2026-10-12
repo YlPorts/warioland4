@@ -50,6 +50,8 @@ public final class MainActivity extends Activity {
     static native void nativeSurfaceChanged(int width, int height);
     static native void nativeDrawFrame(long monotonicNanos);
     static native void nativeResetClock();
+    static native boolean nativeSetSavePath(String path);
+    static native boolean nativeFlushSave();
     static native void nativeSetButtons(int buttons);
 
     @Override public void onCreate(Bundle state) {
@@ -91,6 +93,7 @@ public final class MainActivity extends Activity {
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         root.addView(status, params);
         setContentView(root);
+        nativeSetSavePath(new File(getFilesDir(), "wl4-native.sav").getAbsolutePath());
 
         // Tap banner to re-import a ROM. On first run the picker opens once.
         status.setOnClickListener(v -> pickRom());
@@ -192,6 +195,7 @@ public final class MainActivity extends Activity {
         rendering = false;
         Choreographer.getInstance().removeFrameCallback(frameCallback);
         nativeSetButtons(0);
+        nativeFlushSave();
         surface.onPause();
         super.onPause();
     }
