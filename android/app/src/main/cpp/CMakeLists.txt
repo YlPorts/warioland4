@@ -8,6 +8,7 @@ add_library(wl4_native SHARED
     frame_clock.cpp
     native_memory.cpp
     wl4_host_game_globals.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/init_helpers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/screen_shake.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/interrupt_callbacks.c

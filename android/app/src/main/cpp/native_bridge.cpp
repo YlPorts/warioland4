@@ -83,6 +83,8 @@ void buildDiagnosticScene(const std::vector<uint8_t>& rom) {
     gScreenShakeX = {};
     gScreenShakeY = {};
     gButtonsHeld = gButtonsHeldCopy = gButtonsPressed = 0;
+    gMainGameMode = GM_CUTSCENE;
+    gDisableSoftReset = 0;
     gInterruptCheck = 0;
     wl4HostIrqFlags = 0;
     InterruptCallbackSetVBlank(nullptr);
@@ -167,6 +169,12 @@ void updateDiagnosticCamera(int ticks) {
     for (int frame = 0; frame < ticks; ++frame) {
         wl4HostKeyInput = gMemory.Read16(0x04000130);
         PollInput();
+        CheckSoftReset(); // original src/main.c function
+        // Diagnostic only: disarm the reset state for the next host test frame.
+        if (gMainGameMode == GM_SOFT_RESET) {
+            gMainGameMode = GM_CUTSCENE;
+            gCameraBaseX = gCameraBaseY = 0;
+        }
         if (gButtonsPressed & 1u) ScreenShakeRequestXWithAmplitude(24, 3);
         if (gButtonsPressed & 2u) ScreenShakeRequestY(24, 3);
         const int dx = ((gButtonsHeld & 16u) != 0) -

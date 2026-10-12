@@ -34,3 +34,12 @@ ROM checksum checks and SRAM storage scaffolding are unchanged from v0.3.
 No copyrighted ROM content is distributed. The CI debug APK is a
 **non-playable development checkpoint**, not a release.
 See `.github/workflows/android-native.yml` for build and tests.
+
+## 0.5 — Original main.c handler linked
+
+The Android ARM64 build now compiles `src/main.c` in a guarded host mode.
+Only the original `CheckSoftReset` function, `gMainGameMode`, and
+`gDisableSoftReset` are enabled so far. A+B+Start+Select exercises
+the original handler. The full `AgbMain` loop and other game systems
+remain GBA-only. This is an incremental native game-code milestone
+and **does not run levels**.

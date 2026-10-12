@@ -1,3 +1,19 @@
+#ifdef WL4_ANDROID_NATIVE
+#include "wl4_host_game.h"
+s16 gMainGameMode = GM_CUTSCENE;
+u8 gDisableSoftReset = 0;
+void CheckSoftReset(void)
+{
+    if (gMainGameMode == GM_SOFT_RESET || gDisableSoftReset) {
+        return;
+    }
+
+    if (CHECK_KEYS_ALL(gButtonsHeld, A_BUTTON | B_BUTTON | START_BUTTON | SELECT_BUTTON)) {
+        gMainGameMode = GM_SOFT_RESET;
+    }
+}
+
+#else
 #include "main.h"
 
 #include "init_helpers.h"
@@ -315,3 +331,5 @@ void ClearSRAM(void)
 {
     func_8000CE0();
 }
+
+#endif  // WL4_ANDROID_NATIVE

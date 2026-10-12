@@ -49,6 +49,14 @@ jobs:
             android/tests/test_original_host_modules.cpp \
             /tmp/wl4-native-objects/*.o -o /tmp/wl4-original-host-test
           /tmp/wl4-original-host-test
+      - name: Test original main.c soft-reset handler
+        run: |
+          cc -std=gnu11 -DWL4_ANDROID_NATIVE -Iandroid/app/src/main/cpp -Wall -Wextra -Werror -c src/main.c -o /tmp/wl4-main-host.o
+          cc -std=gnu11 -DWL4_ANDROID_NATIVE -Iandroid/app/src/main/cpp -Wall -Wextra -Werror -c src/init_helpers.c -o /tmp/wl4-input-host.o
+          cc -std=gnu11 -DWL4_ANDROID_NATIVE -Iandroid/app/src/main/cpp -Wall -Wextra -Werror -c android/app/src/main/cpp/wl4_host_game_globals.c -o /tmp/wl4-global-host.o
+          c++ -std=c++17 -Wall -Wextra -Werror android/tests/test_original_soft_reset.cpp \
+            /tmp/wl4-main-host.o /tmp/wl4-input-host.o /tmp/wl4-global-host.o -o /tmp/wl4-reset-test
+          /tmp/wl4-reset-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -67,5 +75,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: warioland4-android-original-host-modules-0.4-not-playable
+          name: warioland4-android-original-main-module-0.5-not-playable
           path: android/app/build/outputs/apk/debug/app-debug.apk

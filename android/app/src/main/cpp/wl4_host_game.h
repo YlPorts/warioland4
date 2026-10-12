@@ -45,6 +45,20 @@ extern u16 gButtonsHeldCopy;
 extern u16 gButtonsPressed;
 void PollInput(void);
 
+// Wario Land 4's original main.c mode values and soft-reset button handler.
+enum {
+    GM_CUTSCENE = 0, GM_STAGE_SELECT = 1, GM_GAME_SCREEN = 2,
+    GM_SOFT_RESET = 3, GM_PAUSE = 4
+};
+#define A_BUTTON 0x0001u
+#define B_BUTTON 0x0002u
+#define SELECT_BUTTON 0x0004u
+#define START_BUTTON 0x0008u
+#define CHECK_KEYS_ALL(keys,mask) (((keys) & (mask)) == (mask))
+extern s16 gMainGameMode;
+extern u8 gDisableSoftReset;
+void CheckSoftReset(void);
+
 struct ScreenShakeParameters {
     u8 duration;
     u8 frameTimer;
