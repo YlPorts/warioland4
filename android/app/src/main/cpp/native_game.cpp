@@ -30,7 +30,7 @@ bool NativeGame::ReadEntrances(const NativeMemory& memory,std::string* error) {
             if(error) *error="Invalid room entrance";
             return false;
         }
-        entries.push_back({data[0],data[1],data[2],data[3],data[4],data[5],data[6],int8_t(data[7]),int8_t(data[8])});
+        entries.push_back({data[0],data[1],data[2],data[3],data[4],data[5],data[6],int8_t(data[7]),int8_t(data[8]),data[9],uint16_t(data[10]|(data[11]<<8))});
     }
     if(error)*error="Unterminated entrance table";
     return false;
@@ -51,8 +51,15 @@ bool NativeGame::Enter(const NativeMemory& memory,size_t index,std::string* erro
     const auto entry=entrances_[index];
     RoomAssets next;
     if(!next.Load(memory,0,entry.room,error)) return false;
+    NativeObjects objects;
+    if(!objects.Load(memory,next,entry.graphicsGroup,error))return false;
+    for(auto& object:objects.Objects())for(const auto& state:objectStates_)if(state[0]==entry.room&&state[1]==object.slot){
+        object.opened=state[2]==2;object.active=state[2]==2;
+    }
     for(const auto& tile:broken_) if(tile[0]==entry.room) next.ClearTile(tile[1],tile[2]);
     room_=std::move(next);
+    objects_=std::move(objects);
+    if(entry.music && !escapeFrames_)music_=entry.music;
     checkpoint_=index;
     int x=entry.left*64+(entry.offsetX+8)*4;
     int y=(entry.bottom+1)*64+entry.offsetY*4-1;
@@ -182,9 +189,14 @@ void NativeGame::FollowCamera() {
 void NativeGame::Tick(const NativeMemory& memory,uint16_t buttons) {
     const uint16_t pressed=buttons&~previousButtons_;
     previousButtons_=buttons;
-    if(pressed&StartButton) paused_=!paused_;
-    if(pressed&Select) {Enter(memory,checkpoint_);paused_=false;return;}
-    if(paused_) return;
+    if(pressed&StartButton){paused_=!paused_;Sound(290);}
+    if(pressed&Select) {if(completed_)Start(memory);else Enter(memory,checkpoint_);paused_=false;return;}
+    if(paused_ || completed_) return;
+    if(invulnerability_)--invulnerability_;
+    if(escapeFrames_>0 && --escapeFrames_==0){
+        // Restart the attempt, including Keyzer and switch object state.
+        Start(memory);return;
+    }
     if(transitionTimer_) --transitionTimer_;
     if(attackTimer_) --attackTimer_;
     const int input=((buttons&Right)!=0)-((buttons&Left)!=0);
@@ -203,7 +215,7 @@ void NativeGame::Tick(const NativeMemory& memory,uint16_t buttons) {
         if(pressed&A) {player_.climbing=false;player_.vy=-176;player_.grounded=false;}
     } else {
         if(input && !attackTimer_) player_.right=input>0;
-        if((pressed&B) && player_.pose!=27) attackTimer_=46;
+        if((pressed&B) && player_.pose!=27){attackTimer_=46;Sound(30);}
         if(attackTimer_) {
             const int target=player_.right ? 96 : -96;
             player_.vx+=std::clamp(target-player_.vx,-4,4);
@@ -216,6 +228,7 @@ void NativeGame::Tick(const NativeMemory& memory,uint16_t buttons) {
         if((pressed&A) && wasGrounded) {
             player_.vy=crouched ? -128 : -176;
             player_.grounded=false;
+            Sound(13);
         }
         if(!(buttons&A) && player_.vy<0) player_.vy=0;
         if((pressed&Down) && !wasGrounded) {SetPose(27);player_.vx=0;attackTimer_=0;player_.vy=128;}
@@ -230,6 +243,7 @@ void NativeGame::Tick(const NativeMemory& memory,uint16_t buttons) {
         else if(attackTimer_) SetPose(22);
         else SetPose(std::abs(player_.vx)>2 ? ((buttons&Run) ? 23 : 0) : 2);
     }
+    UpdateObjects(memory,pressed);
     if(player_.y>room_.PixelHeight()*4+128) {Enter(memory,checkpoint_);return;}
     if(!transitionTimer_) {
         const int x=player_.x/64,y=player_.y/64;
@@ -250,5 +264,59 @@ void NativeGame::BuildVideo(VideoState* video) const {
     room_.BuildVideo(cameraX_,cameraY_,video);
     sprites_.Draw(player_.pose,player_.right,player_.vy>=0,frame_,
                   player_.x/4-cameraX_,player_.y/4-cameraY_,video);
+    const auto& animation=sprites_.Animation(player_.pose,player_.right,player_.vy>=0);
+    objects_.Draw(cameraX_,cameraY_,animation[frame_%animation.size()].objects.size(),video);
+    if(invulnerability_ && (invulnerability_&4))for(size_t i=0;i<animation[frame_%animation.size()].objects.size();++i){
+        video->oam[i*8]=0;video->oam[i*8+1]=2;
+    }
+}
+
+void NativeGame::RememberObject(uint8_t slot,uint8_t state){
+    for(auto& item:objectStates_)if(item[0]==room_.RoomId()&&item[1]==slot){item[2]=state;return;}
+    objectStates_.push_back({{room_.RoomId(),slot,state}});
+}
+
+void NativeGame::UpdateObjects(const NativeMemory& memory,uint16_t pressed){
+    for(auto& object:objects_.Objects()){
+        if(!object.active)continue;
+        const bool enemy=object.id==17||object.id==18||object.id==19||object.id==42||object.id==43;
+        if(enemy && !object.stunned){
+            const int direction=object.right ? 1 : -1;
+            const int next=object.x+direction*2;
+            if(SolidAt(next+direction*36,object.y-32,false,object.y) || !Supported(next,object.y-1))object.right=!object.right;
+            else object.x=next;
+        }
+        if(object.stunned)--object.stunned;
+        NativeObjects::Animate(&object);
+        const int up=object.id==7 ? 168 : (enemy ? 80 : 64);
+        const int radius=object.id==6 ? 56 : 40;
+        const bool overlaps=player_.x+28>=object.x-radius && player_.x-28<=object.x+radius &&
+            player_.y>=object.y-up && player_.y-120<=object.y+16;
+        if(!overlaps)continue;
+        if(object.id==8 && !keyzer_){keyzer_=true;object.active=false;RememberObject(object.slot,1);Sound(309);}
+        else if(object.id==6){score_+=1000;object.active=false;RememberObject(object.slot,1);Sound(314);}
+        else if(object.id==13 && health_<8){++health_;object.active=false;RememberObject(object.slot,1);Sound(320);}
+        else if(object.id<=5 && !object.opened && (attackTimer_ || player_.pose==27)){
+            object.opened=true;object.frame=0;object.timer=0;RememberObject(object.slot,2);
+            if(object.id<4)jewels_|=1u<<object.id;
+            if(object.id==5)health_=8;
+            score_+=500;Sound(220);
+        }else if(object.id==7 && !object.opened && player_.grounded){
+            object.opened=true;object.frame=0;object.timer=0;RememberObject(object.slot,2);
+            gSwitchStates[4]=1;escapeFrames_=180*60;music_=681;Sound(217);
+        }else if(object.id==41 && escapeFrames_>0 && keyzer_){completed_=true;escapeFrames_=0;Sound(314);}
+        else if(enemy){
+            if(attackTimer_ || player_.pose==27 || (player_.vy>0 && player_.y<object.y-48)){
+                if(object.stunned && !(pressed&B) && player_.pose!=27)continue;
+                if(object.stunned || player_.pose==27){object.active=false;RememberObject(object.slot,3);score_+=100;Sound(312);}
+                else{object.stunned=180;object.frame=0;object.timer=0;Sound(351);}
+                if(player_.vy>0){player_.vy=-128;player_.grounded=false;}
+            }else if(!object.stunned && !invulnerability_){
+                --health_;invulnerability_=120;player_.vx=player_.x<object.x ? -96 : 96;player_.vy=-128;player_.grounded=false;
+                attackTimer_=0;Sound(19);
+                if(health_<=0){health_=8;Enter(memory,checkpoint_);return;}
+            }
+        }
+    }
 }
 } // namespace wl4

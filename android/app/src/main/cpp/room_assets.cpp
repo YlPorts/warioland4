@@ -112,6 +112,7 @@ bool RoomAssets::LoadInto(const NativeMemory& memory, uint8_t stageId, uint8_t r
     if (!tileset) return fail(error, "Tileset outside ROM");
     for (size_t i = 0; i < 4; ++i) parameters_[i] = header[i + 1];
     scrolling_ = header[25];
+    spriteAddress_ = le32(header+32); // Normal difficulty RoomSpriteData list.
     const size_t graphicsSize = le16(tileset + 4);
     const size_t animatedSize = le16(tileset + 16);
     if (graphicsSize > 0xb7c0 || animatedSize > 0xb7c0 ||

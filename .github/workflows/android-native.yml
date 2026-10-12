@@ -110,6 +110,8 @@ jobs:
           c++ -std=c++17 -Wall -Wextra -Werror \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             android/app/src/main/cpp/native_game.cpp \
+            android/app/src/main/cpp/native_game_save.cpp \
+            android/app/src/main/cpp/native_objects.cpp \
             android/app/src/main/cpp/wario_assets.cpp \
             android/app/src/main/cpp/room_assets.cpp \
             android/app/src/main/cpp/native_memory.cpp \
@@ -118,6 +120,15 @@ jobs:
             android/tests/test_native_game.cpp /tmp/wl4-game-*.o \
             -o /tmp/wl4-game-test
           /tmp/wl4-game-test
+      - name: Test native music commands, PCM, pause and malformed samples
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            android/app/src/main/cpp/m4a_audio.cpp \
+            android/app/src/main/cpp/native_memory.cpp \
+            android/app/src/main/cpp/gba_bios_decode.cpp \
+            android/tests/test_m4a_audio.cpp -o /tmp/wl4-audio-test
+          /tmp/wl4-audio-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -136,5 +147,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: warioland4-android-0.9-playable-alpha-entry-passage
+          name: warioland4-android-0.10-audio-objects-progress
           path: android/app/build/outputs/apk/debug/app-debug.apk

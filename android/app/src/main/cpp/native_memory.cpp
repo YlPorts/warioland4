@@ -108,6 +108,9 @@ bool NativeMemory::CopyRegion(uint32_t source, uint32_t destination,
 
 bool NativeMemory::LoadRom(std::vector<uint8_t> rom) {
     if (rom.empty() || rom.size() > 0x2000000) return false;
+    uint64_t fingerprint=14695981039346656037ull;
+    for(uint8_t byte:rom){fingerprint^=byte;fingerprint*=1099511628211ull;}
+    romFingerprint_=fingerprint;
     rom_ = std::move(rom);
     return true;
 }

@@ -7,6 +7,9 @@ add_library(wl4_native SHARED
     room_assets.cpp
     wario_assets.cpp
     native_game.cpp
+    native_game_save.cpp
+    native_objects.cpp
+    m4a_audio.cpp
     gba_video.cpp
     frame_clock.cpp
     native_memory.cpp

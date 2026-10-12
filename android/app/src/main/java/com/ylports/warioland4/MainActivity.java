@@ -35,10 +35,17 @@ public final class MainActivity extends Activity {
     private TextView status;
     private boolean pickerOpen;
     private boolean rendering;
+    private final AudioPump audio = new AudioPump();
+    private boolean romLoaded;
+    private long nextStatus;
     private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
         @Override public void doFrame(long frameTimeNanos) {
             if (!rendering || surface == null) return;
             surface.requestRender();
+            if (romLoaded && frameTimeNanos >= nextStatus) {
+                status.setText(nativeStatus());
+                nextStatus = frameTimeNanos + 500000000L;
+            }
             Choreographer.getInstance().postFrameCallback(this);
         }
     };
@@ -55,6 +62,8 @@ public final class MainActivity extends Activity {
     static native boolean nativeSetSavePath(String path);
     static native boolean nativeFlushSave();
     static native void nativeSetButtons(int buttons);
+    static native void nativeRenderAudio(short[] stereo);
+    static native String nativeStatus();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -170,12 +179,14 @@ public final class MainActivity extends Activity {
     }
 
     private boolean loadAndValidate(File file) {
+        romLoaded = false;
         String version = checkRom(file);
         if (version == null || !nativeLoadRom(file.getAbsolutePath())) {
             status.setText("Error al validar o decodificar recursos de ROM");
             return false;
         }
-        status.setText("ROM " + version + " • Alfa jugable • A: salto • B: embestida • L/R: correr • START: pausa • SELECT: reaparecer");
+        romLoaded = true;
+        status.setText(nativeStatus());
         return true;
     }
 
@@ -196,6 +207,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onPause() {
         rendering = false;
+        audio.stop();
         Choreographer.getInstance().removeFrameCallback(frameCallback);
         nativeSetButtons(0);
         nativeFlushSave();
@@ -208,6 +220,7 @@ public final class MainActivity extends Activity {
         if (surface != null) {
             surface.onResume();
             nativeResetClock();
+            audio.start();
             rendering = true;
             Choreographer.getInstance().postFrameCallback(frameCallback);
         }

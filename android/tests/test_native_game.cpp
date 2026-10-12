@@ -92,6 +92,15 @@ int main(int argc,char** argv) {
     }
     assert(game.Enter(memory,0,&error));
     for(int i=0;i<90;++i) game.Tick(memory,0);
+    const auto saved=game.Save(memory);
+    wl4::NativeGame restored;
+    assert(restored.Restore(memory,saved,&error));
+    assert(restored.Player().x==game.Player().x && restored.Player().y==game.Player().y);
+    assert(restored.BrokenTiles()==game.BrokenTiles());
+    auto corrupt=saved;corrupt[20]^=1;
+    const int before=restored.Player().x;
+    assert(!restored.Restore(memory,corrupt,&error) && restored.Player().x==before);
+    corrupt=saved;corrupt.pop_back();assert(!restored.Restore(memory,corrupt,&error));
     wl4::VideoState frame;
     game.BuildVideo(&frame);
     std::vector<uint32_t> pixels;
@@ -106,4 +115,28 @@ int main(int argc,char** argv) {
     }
     std::cout<<"Original Wario animations, gravity, jump, landing, movement, pause and "
              <<game.Entrances().size()<<" real entrances passed\n";
+    if(synthetic){
+        assert(memory.LoadRom(SyntheticGameRom(true)));
+        assert(!restored.Restore(memory,saved,&error)); // Bound to the imported ROM.
+        assert(game.Start(memory,&error));
+        assert(game.Objects().Objects().size()==6);
+        game.Place(4*64,10*64-1);game.Tick(memory,0);assert(game.Keyzer());
+        game.Place(7*64,10*64-1);game.Tick(memory,0);assert(game.Score()==1000);
+        game.Place(8*64+32,10*64-1);game.Tick(memory,0);assert(game.EscapeFrames()>0 && gSwitchStates[4]);
+        game.Place(10*64+32,10*64-1);game.Tick(memory,2);assert(game.Jewels()==1);
+        assert(game.Enter(memory,0,&error)); // Finish the prior bash before the damage check.
+        game.Place(14*64+32,10*64-1);game.Tick(memory,0);assert(game.Health()==7);
+        for(int i=0;i<10;++i)game.Tick(memory,0);
+        assert(game.Health()==7); // Invulnerability prevents repeated damage.
+        const auto progress=game.Save(memory);
+        assert(restored.Restore(memory,progress,&error));
+        assert(restored.Keyzer() && restored.Jewels()==1 && restored.Health()==7 && restored.EscapeFrames()>0);
+        assert(!restored.Objects().Objects()[0].active && !restored.Objects().Objects()[1].active);
+        assert(restored.Objects().Objects()[2].opened && restored.Objects().Objects()[3].opened);
+        restored.Place(18*64+32,10*64-1);restored.Tick(memory,0);
+        assert(restored.Completed());
+        assert(game.Restore(memory,restored.Save(memory),&error) && game.Completed());
+        game.Tick(memory,4);assert(!game.Completed() && !game.Keyzer());
+        std::cout<<"Authored Keyzer, diamond, switch, chest, damage, invulnerability and persistent progress tests passed\n";
+    }
 }

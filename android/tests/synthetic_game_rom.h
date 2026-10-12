@@ -2,10 +2,11 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include "../app/src/main/cpp/object_catalog.h"
 
 // Hand-authored test fixture. Contains no bytes extracted from the game.
 // It uses the documented table/room ABI to exercise gameplay in CI.
-inline std::vector<uint8_t> SyntheticGameRom() {
+inline std::vector<uint8_t> SyntheticGameRom(bool objects=false) {
     std::vector<uint8_t> rom(0x800000,0);
     const auto put16=[&](size_t at,uint16_t v){rom[at]=uint8_t(v);rom[at+1]=uint8_t(v>>8);};
     const auto put32=[&](size_t at,uint32_t v){put16(at,uint16_t(v));put16(at+2,uint16_t(v>>16));};
@@ -64,5 +65,25 @@ inline std::vector<uint8_t> SyntheticGameRom() {
     put16(0x2deb18,uint16_t(-28));put16(0x2deb1a,uint16_t(-126));put16(0x2deb1c,28);
     for(size_t pose=0;pose<78;++pose)for(size_t dir=0;dir<2;++dir)put32(0x2dd110+pose*8+dir*4,0x08105000);
     for(size_t i=0;i<4;++i)put32(0x2dd3f8+i*4,0x08105000);
+    if(objects){
+        put32(0x101000+32,0x08111000);
+        const uint8_t records[]={9,4,9, 9,6,7, 9,8,8, 9,10,1, 9,14,17, 9,18,18, 255,0,0};
+        std::copy_n(records,sizeof(records),rom.begin()+0x111000);
+        put32(0x78ef78,0x08112000);rom[0x112000]=42;rom[0x112001]=0;
+        rom[0x112002]=41;rom[0x112003]=1;
+        for(unsigned id:{0u,25u,26u}){
+            put32(0x78ebf0+id*4,0x08114000);put32(0x78edb4+id*4,0x08116000);
+            put32(0x3b2c90+id*4,0x800);
+        }
+        std::fill_n(rom.begin()+0x114000,0x800,uint8_t(0x11));put16(0x116002,0x7fff);
+        put16(0x113000,1);put16(0x113002,248);put16(0x113004,508);put16(0x113006,128|(4<<12));
+        using namespace wl4::object_catalog;
+        for(uint32_t address:{sKeyzerIdleOam,sDiamondOamData,sEscapeSwitchIdleOam,sEscapeSwitchPressedOam,
+                              sBoxJewelPieceNEClosedOam,sBoxJewelPieceOpenedOam,sMarumenIdleOam,sMarumenStunnedOam,sVortexSmallPartOam}){
+            const size_t at=address-0x08000000;
+            put32(at,0x08113000);rom[at+4]=4;
+            std::fill_n(rom.begin()+at+8,8,0);
+        }
+    }
     return rom;
 }

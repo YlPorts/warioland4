@@ -13,6 +13,9 @@
 #include "gba_video.h"
 #include "native_memory.h"
 #include "native_game.h"
+#include "m4a_audio.h"
+#include <cstdio>
+#include <sstream>
 #include <string>
 
 extern "C" {
@@ -29,10 +32,34 @@ std::string gSavePath;
 wl4::VideoState gState;
 wl4::GbaVideo gVideo;
 wl4::NativeGame gGame;
+wl4::M4aAudio gAudio;
+uint16_t gMusic=0;
+int gSaveTimer=0;
 wl4::FrameClock gClock;
 std::vector<uint32_t> gPixels;
 bool gSceneLoaded = false;
 bool gUploadPending = false;
+
+bool flushProgress(){
+    if(!gSceneLoaded || gSavePath.empty())return false;
+    const auto data=gGame.Save(gMemory);
+    const std::string temporary=gSavePath+".progress.tmp",path=gSavePath+".progress";
+    std::ofstream out(temporary,std::ios::binary|std::ios::trunc);
+    if(!out || !out.write(reinterpret_cast<const char*>(data.data()),data.size()))return false;
+    out.flush();if(!out)return false;out.close();if(!out)return false;
+    return std::rename(temporary.c_str(),path.c_str())==0;
+}
+
+void loadProgress(){
+    if(gSavePath.empty())return;
+    std::ifstream in(gSavePath+".progress",std::ios::binary|std::ios::ate);
+    if(!in)return;
+    const auto length=in.tellg();if(length<0 || length>65536)return;
+    in.seekg(0);std::vector<uint8_t> data(static_cast<size_t>(length));
+    if(!in.read(reinterpret_cast<char*>(data.data()),length))return;
+    std::string error;
+    if(!gGame.Restore(gMemory,data,&error))LOGE("Progress ignored: %s",error.c_str());
+}
 
 GLuint gTexture = 0;
 bool gTextureAllocated = false;
@@ -55,6 +82,8 @@ bool buildRoomScene() {
         LOGE("Native game startup failed: %s", error.c_str());
         return false;
     }
+    loadProgress();
+    gAudio.Reset();gMusic=gGame.Music();gAudio.Play(gMemory,gMusic,true);gSaveTimer=0;
     wl4HostSetDmaFillHandler(&gMemory, hostDmaFill);
     InitializeVideoMemory();
     wl4::VideoState state;
@@ -159,9 +188,13 @@ void updateNativeGame(int ticks) {
             if (!gGame.Start(gMemory, &error)) {
                 LOGE("Reset failed: %s", error.c_str());
             }
+            gAudio.Reset();gMusic=gGame.Music();gAudio.Play(gMemory,gMusic,true);
             gMainGameMode = GM_GAME_SCREEN;
         }
         gGame.Tick(gMemory, gButtonsHeld);
+        if(gGame.Music()!=gMusic){gMusic=gGame.Music();gAudio.Play(gMemory,gMusic,true);}
+        for(uint16_t sound:gGame.TakeSounds())gAudio.Play(gMemory,sound,false);
+        if(++gSaveTimer>=300){gSaveTimer=0;flushProgress();}
         gInterruptCheck = 0;
         InterruptCallbackCallVBlank();
     }
@@ -189,6 +222,8 @@ Java_com_ylports_warioland4_MainActivity_nativeLoadRom(JNIEnv* env, jclass, jstr
     if (!in.read(reinterpret_cast<char*>(rom.data()), length)) return JNI_FALSE;
     {
         std::lock_guard<std::mutex> lock(gMutex);
+        if(gSceneLoaded)flushProgress();
+        gSceneLoaded=false;gAudio.Reset();
         if (!gMemory.LoadRom(std::move(rom))) return JNI_FALSE;
         if (!buildRoomScene()) return JNI_FALSE;
     }
@@ -279,5 +314,34 @@ Java_com_ylports_warioland4_MainActivity_nativeSetSavePath(JNIEnv* env, jclass,
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_ylports_warioland4_MainActivity_nativeFlushSave(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> lock(gMutex);
-    return !gSavePath.empty() && gMemory.FlushSaveFile(gSavePath);
+    return !gSavePath.empty() && gMemory.FlushSaveFile(gSavePath) && (!gSceneLoaded || flushProgress());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_ylports_warioland4_MainActivity_nativeRenderAudio(JNIEnv* env,jclass,jshortArray destination){
+    if(!destination)return;
+    const jsize count=env->GetArrayLength(destination);
+    if(count<=0 || count>8192 || (count&1))return;
+    std::vector<int16_t> samples(static_cast<size_t>(count),0);
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        if(gSceneLoaded)gAudio.Render(gMemory,samples.data(),samples.size()/2,gGame.Paused()||gGame.Completed());
+    }
+    env->SetShortArrayRegion(destination,0,count,samples.data());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_ylports_warioland4_MainActivity_nativeStatus(JNIEnv* env,jclass){
+    std::lock_guard<std::mutex> lock(gMutex);
+    std::ostringstream status;
+    if(!gSceneLoaded)status<<"Elige tu ROM";
+    else if(gGame.Completed())status<<"Pasaje completado | SELECT: jugar de nuevo";
+    else{
+        status<<"Vida "<<gGame.Health()<<"/8 | Puntos "<<gGame.Score()<<" | Joyas ";
+        unsigned count=0;for(unsigned bits=gGame.Jewels();bits;bits>>=1)count+=bits&1;
+        status<<count<<"/4 | Keyzer "<<(gGame.Keyzer()?"SI":"--");
+        if(gGame.EscapeFrames()>0)status<<" | ESCAPA "<<gGame.EscapeFrames()/60<<"s";
+        if(gGame.Paused())status<<" | PAUSA";
+    }
+    return env->NewStringUTF(status.str().c_str());
 }

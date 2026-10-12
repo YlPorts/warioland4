@@ -24,6 +24,7 @@ public:
     bool LoadRom(std::vector<uint8_t> rom);
     bool HasRom() const { return !rom_.empty(); }
     size_t RomSize() const { return rom_.size(); }
+    uint64_t RomFingerprint() const {return romFingerprint_;}
     // Checked, non-mirrored ROM view, valid until LoadRom is called again.
     // Used only under the bridge lock or by portable asset-loading tools.
     const uint8_t* RomRange(uint32_t address, size_t bytes) const;
@@ -67,6 +68,7 @@ private:
     std::array<uint8_t, 0x400> oam_{};
     std::array<uint8_t, SaveSize> sram_{};
     std::vector<uint8_t> rom_;
+    uint64_t romFingerprint_=0;
     uint16_t buttonsHeld_ = 0;
     bool saveDirty_ = false;
 };

@@ -44,6 +44,7 @@ public:
     const RoomLayer& Layer(size_t index) const { return layers_.at(index); }
     uint8_t LayerParameter(size_t index) const { return parameters_.at(index); }
     uint8_t RoomTableIndex() const { return roomTableIndex_; }
+    uint32_t SpriteAddress() const { return spriteAddress_; }
     uint16_t AttributeAt(size_t layer, int column, int row) const;
     uint8_t CollisionAt(size_t layer, int column, int row) const;
     bool ClearTile(int column, int row);
@@ -56,6 +57,7 @@ private:
     std::array<uint8_t, 4> parameters_{};
     uint8_t scrolling_ = 0, roomCount_ = 0, roomId_ = 0, stageId_ = 0;
     uint8_t roomTableIndex_ = 0;
+    uint32_t spriteAddress_ = 0;
     int initialCameraX_ = 0, initialCameraY_ = 0;
 };
 
