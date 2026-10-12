@@ -173,7 +173,7 @@ public final class MainActivity extends Activity {
             status.setText("Error al validar o decodificar recursos de ROM");
             return false;
         }
-        status.setText("ROM " + version + " • Diagnóstico BG/OBJ • Cruceta mueve cámara • NO jugable");
+        status.setText("ROM " + version + " • Diagnóstico BG/OBJ • Cruceta: cámara • A/B: sacudida • NO jugable");
         return true;
     }
 

@@ -1,3 +1,9 @@
+#ifdef WL4_ANDROID_NATIVE
+#include "wl4_host_game.h"
+u16 gButtonsHeld = 0;
+u16 gButtonsHeldCopy = 0;
+u16 gButtonsPressed = 0;
+#else
 #include "interrupts.h"
 #include "oam.h"
 
@@ -7,10 +13,15 @@ IWRAM_DATA u16 gButtonsHeldCopy = 0;
 IWRAM_DATA u16 gButtonsPressed = 0;
 IWRAM_DATA u8 gOamSlotsUsed = 0;
 
+#endif
+
+#ifndef WL4_ANDROID_NATIVE
 void LZ77UnCompVramWrapper(const u32* src, void* dest)
 {
     LZ77UnCompVram(src, dest);
 }
+
+#endif
 
 void PollInput(void)
 {
@@ -21,6 +32,7 @@ void PollInput(void)
     gButtonsHeldCopy = gButtonsHeld = keys;
 }
 
+#ifndef WL4_ANDROID_NATIVE
 void InitializeVideoMemory(void)
 {
     DmaFill16(3, 0, VRAM, VRAM_SIZE);
@@ -47,3 +59,5 @@ void ResetFreeOam(void)
         *pOamSlot++ = 0;
     }
 }
+
+#endif  // !WL4_ANDROID_NATIVE

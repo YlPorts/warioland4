@@ -36,6 +36,19 @@ jobs:
             android/tests/test_original_fixed_point.cpp /tmp/wl4-fixed-point.o \
             -o /tmp/wl4-fixed-point-test
           /tmp/wl4-fixed-point-test
+      - name: Test original input, screen shake and IRQ callback C modules
+        run: |
+          mkdir -p /tmp/wl4-native-objects
+          for file in wl4_host_game_globals src/init_helpers src/screen_shake src/interrupt_callbacks; do
+            if [ "$file" = wl4_host_game_globals ]; then source=android/app/src/main/cpp/wl4_host_game_globals.c; else source="$file.c"; fi
+            cc -std=gnu11 -DWL4_ANDROID_NATIVE -Iandroid/app/src/main/cpp \
+              -Wall -Wextra -Werror -c "$source" \
+              -o "/tmp/wl4-native-objects/${file##*/}.o"
+          done
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            android/tests/test_original_host_modules.cpp \
+            /tmp/wl4-native-objects/*.o -o /tmp/wl4-original-host-test
+          /tmp/wl4-original-host-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -54,5 +67,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: warioland4-android-memory-host-debug-not-playable
+          name: warioland4-android-original-host-modules-0.4-not-playable
           path: android/app/build/outputs/apk/debug/app-debug.apk

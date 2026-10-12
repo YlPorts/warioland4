@@ -1,4 +1,8 @@
+#ifdef WL4_ANDROID_NATIVE
+#include "wl4_host_game.h"
+#else
 #include "global_data.h"
+#endif
 
 u8 ScreenShakeRequestY(u8 duration, u8 amplitude)
 {

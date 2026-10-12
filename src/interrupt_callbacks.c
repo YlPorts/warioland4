@@ -1,6 +1,10 @@
+#ifdef WL4_ANDROID_NATIVE
+#include "wl4_host_game.h"
+#else
 #include "interrupt_callbacks.h"
 
 #include "interrupts.h"
+#endif
 
 void InterruptCallbackCallVBlank(void)
 {

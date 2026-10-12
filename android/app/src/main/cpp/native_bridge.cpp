@@ -16,6 +16,7 @@
 
 extern "C" {
 #include "fixed_point.h"
+#include "wl4_host_game.h"
 }
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "wl4-native", __VA_ARGS__)
@@ -34,7 +35,8 @@ wl4::FrameClock gClock;
 std::vector<uint32_t> gPixels;
 bool gSceneLoaded = false;
 bool gUploadPending = false;
-std::atomic<int> gButtons{0};
+uint16_t gCameraBaseX = 0;
+uint16_t gCameraBaseY = 0;
 
 GLuint gTexture = 0;
 GLuint gProgram = 0;
@@ -77,6 +79,13 @@ void buildDiagnosticScene(const std::vector<uint8_t>& rom) {
     write16(state.oam.data(), 0, 64);          // sprite Y
     write16(state.oam.data(), 2, 104 | 0x8000); // size=2 (32x32)
     write16(state.oam.data(), 4, 32 | 0x0000);  // tile 32, priority 0
+    gCameraBaseX = gCameraBaseY = 0;
+    gScreenShakeX = {};
+    gScreenShakeY = {};
+    gButtonsHeld = gButtonsHeldCopy = gButtonsPressed = 0;
+    gInterruptCheck = 0;
+    wl4HostIrqFlags = 0;
+    InterruptCallbackSetVBlank(nullptr);
     gMemory.InstallVideoState(state);
     gState = gMemory.CaptureVideo();
     gVideo.Render(gState, &gPixels);
@@ -152,22 +161,38 @@ void uploadTexture() {
 
 void updateDiagnosticCamera(int ticks) {
     if (!gSceneLoaded) return;
-    const int buttons = gButtons.load(std::memory_order_relaxed);
-    const int dx = ((buttons & 16) != 0) - ((buttons & 32) != 0);
-    const int dy = ((buttons & 128) != 0) - ((buttons & 64) != 0);
-    if (!dx && !dy) return;
-    // Link the original src/fixed_point.c into the ARM64 binary: this is
-    // actual decompiled game arithmetic (not a rewritten demo math routine).
-    const int16_t step = Q_8_8(0.5);
-    const int deltaX = FixedMul(dx * 4 * ticks, step);
-    const int deltaY = FixedMul(dy * 4 * ticks, step);
-    const uint16_t x = static_cast<uint16_t>(gMemory.Read16(0x04000010) + deltaX);
-    const uint16_t y = static_cast<uint16_t>(gMemory.Read16(0x04000012) + deltaY);
-    gMemory.Write16(0x04000010, x);
-    gMemory.Write16(0x04000012, y);
-    // Parallax is only a video diagnostic; not actual game camera behavior.
-    gMemory.Write16(0x04000014, x / 2);
-    gMemory.Write16(0x04000016, y / 2);
+    bool redraw = false;
+    // Call the original decompiled input, shake and interrupt handlers once
+    // per logical frame instead of tying game ticks to the Android refresh rate.
+    for (int frame = 0; frame < ticks; ++frame) {
+        wl4HostKeyInput = gMemory.Read16(0x04000130);
+        PollInput();
+        if (gButtonsPressed & 1u) ScreenShakeRequestXWithAmplitude(24, 3);
+        if (gButtonsPressed & 2u) ScreenShakeRequestY(24, 3);
+        const int dx = ((gButtonsHeld & 16u) != 0) -
+                       ((gButtonsHeld & 32u) != 0);
+        const int dy = ((gButtonsHeld & 128u) != 0) -
+                       ((gButtonsHeld & 64u) != 0);
+        const int16_t step = Q_8_8(0.5);
+        gCameraBaseX = static_cast<uint16_t>(gCameraBaseX + FixedMul(dx * 4, step));
+        gCameraBaseY = static_cast<uint16_t>(gCameraBaseY + FixedMul(dy * 4, step));
+        // The real screen-shake functions now drive only our diagnostic scene.
+        const int shakeX = ScreenShakeUpdateX();
+        const int shakeY = ScreenShakeUpdateY();
+        const uint16_t x = static_cast<uint16_t>(gCameraBaseX + shakeX);
+        const uint16_t y = static_cast<uint16_t>(gCameraBaseY + shakeY);
+        if (x != gMemory.Read16(0x04000010) ||
+            y != gMemory.Read16(0x04000012)) {
+            gMemory.Write16(0x04000010, x);
+            gMemory.Write16(0x04000012, y);
+            gMemory.Write16(0x04000014, static_cast<uint16_t>(gCameraBaseX / 2 + shakeX / 2));
+            gMemory.Write16(0x04000016, static_cast<uint16_t>(gCameraBaseY / 2 + shakeY / 2));
+            redraw = true;
+        }
+        gInterruptCheck = 0;
+        InterruptCallbackCallVBlank();
+    }
+    if (!redraw) return;
     gState = gMemory.CaptureVideo();
     gVideo.Render(gState, &gPixels);
     gUploadPending = true;
@@ -260,7 +285,6 @@ Java_com_ylports_warioland4_MainActivity_nativeDrawFrame(JNIEnv*, jclass,
 extern "C" JNIEXPORT void JNICALL
 Java_com_ylports_warioland4_MainActivity_nativeSetButtons(JNIEnv*, jclass,
                                                             jint buttons) {
-    gButtons.store(buttons, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(gMutex);
     gMemory.SetButtons(static_cast<uint16_t>(buttons));
 }
